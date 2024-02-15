@@ -4,6 +4,8 @@ from synthpop import Synthpop
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 import matplotlib.pyplot as plt
+from .our_smote import SMOTENC_GENERATIVE
+import numpy as np
 
 class Dataset():
     def __init__(self, dataset_name, binary_features=True):
@@ -112,14 +114,25 @@ class Dataset():
         self.original_dataframe_encoded = self.encode(df).copy()
         return self
 
-    def train_synthesizer(self, dataframe, encode=True):
-        synthesizer = Synthpop()
-        dtypes = {col: dtype for col, dtype in self.dtype_map.items() if col in dataframe.columns}
+    def get_synthesizer_method(self, name, dataframe):
+        if name=="cart":
+            synthesizer = Synthpop()
+            arguments = {"dtypes": {col: dtype for col, dtype in self.dtype_map.items() if col in dataframe.columns}}
+        if name=="smote":
+            cat_cols = [col for col in self.categorical_input_cols if col in dataframe.columns]
+            synthesizer = SMOTENC_GENERATIVE(categorical_features=cat_cols, random_state=42)
+            arguments = {}
+            
+        return synthesizer, arguments
+
+    def train_synthesizer(self, name, dataframe, y=[], encode=True):
+
+        synthesizer, arguments = self.get_synthesizer_method(name, dataframe)
+
         if encode:
-            dataframe_transformed = self.encode(dataframe)
-            synthesizer.fit(dataframe_transformed, dtypes)
-        else:
-            synthesizer.fit(dataframe, dtypes)
+            dataframe = self.encode(dataframe)
+
+        synthesizer.fit(dataframe, **arguments)
 
         return synthesizer
 
