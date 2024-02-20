@@ -6,6 +6,7 @@ from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 import matplotlib.pyplot as plt
 from .our_smote import SMOTENC_GENERATIVE
 import numpy as np
+from .tvae_ours import TVAE
 
 class Dataset():
     def __init__(self, dataset_name, binary_features=True):
@@ -61,7 +62,11 @@ class Dataset():
             # Extract categorical column names
             self.categorical_cols = [col for col, dtype in self.dtype_map.items() if dtype == "category"]
             self.categorical_input_cols = self.categorical_cols.copy()
+
+            self.continuous_input_cols = [col for col in self.column_names if col not in self.categorical_cols]
+
             self.categorical_input_cols.remove("income")
+
         else:
             print("Dataset not supported")
             exit(1)
@@ -122,6 +127,10 @@ class Dataset():
             cat_cols = [col for col in self.categorical_input_cols if col in dataframe.columns]
             synthesizer = SMOTENC_GENERATIVE(categorical_features=cat_cols, random_state=42)
             arguments = {}
+        if name=="tvae":
+            cat_cols = [col for col in self.categorical_input_cols if col in dataframe.columns]
+            synthesizer = TVAE()
+            arguments = {"discrete_columns":cat_cols}
             
         return synthesizer, arguments
 
@@ -136,10 +145,22 @@ class Dataset():
 
         return synthesizer
 
-    def generate_data(self, synthesizer, num=100):
-        synthetic_data = synthesizer.generate(int(num))
-        synthetic_data_decoded = self.decode(synthetic_data)
-        return synthetic_data_decoded
+    def generate_data(self, synthesizer, num=100, name="", decode=True):
+        if name=="tvae":
+            synthetic_data = synthesizer.sample(int(num))
+        else:
+            synthetic_data = synthesizer.generate(int(num))
+
+        if decode:
+            synthetic_data = self.decode(synthetic_data)
+        
+        #sanity check
+        if synthetic_data.isnull().values.any():
+            print("Nan in synthetic")
+            exit(1)
+            return
+
+        return synthetic_data
 
     def split_population(self, dataframe, protected_attributes=["sex"]):
         # Split the DataFrame based on the value pairs of protected attributes
