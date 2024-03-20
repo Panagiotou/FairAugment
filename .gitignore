@@ -1,2 +1,12 @@
 **/__pycache__/
 **/catboost_info/
+
+mdgmm/
+
+results/
+
+screen_log*
+
+Fair_Max_Entropy_Distributions
+
+src/Models

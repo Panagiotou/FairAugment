@@ -1,49 +1,0 @@
-[?2004h(base) [01;32mluser@uni0100v0r-olipan[00m:[01;34m~/FairAugment[00m$ conda activate samplestructures
-[?2004l[?2004h(samplestructures) [01;32mluser@uni0100v0r-olipan[00m:[01;34m~/FairAugment[00m$ python ml[K[Kutil/ml_efficiency_class_balance.py 
-[?2004lTraceback (most recent call last):
-  File "/home/luser/FairAugment/util/ml_efficiency_class_balance.py", line 3, in <module>
-    from src.dataset import Dataset
-ModuleNotFoundError: No module named 'src'
-[?2004h(samplestructures) [01;32mluser@uni0100v0r-olipan[00m:[01;34m~/FairAugment[00m$ cd util/
-[?2004l[?2004h(samplestructures) [01;32mluser@uni0100v0r-olipan[00m:[01;34m~/FairAugment/util[00m$ python ml_efficiency_class_balance.py 
-[?2004l/home/luser/miniconda3/envs/samplestructures/lib/python3.11/site-packages/pandas/core/arrays/masked.py:60: UserWarning: Pandas requires version '1.3.6' or newer of 'bottleneck' (version '1.3.5' currently installed).
-  from pandas.core import (
-Catboost
-Decission Tree
-Random Forest
-Catboost
-Decission Tree
-Random Forest
-\begin{table}[h]
-\centering
-\begin{tabular}{l l c c c c c c c c c c c c c c c}
-\hline
-Model & Train data & \multicolumn{15}{c}{Test data} \\
-&  & \multicolumn{5}{c}{Sex=Female} & \multicolumn{5}{c}{Sex=Male} & \multicolumn{5}{c}{Overall}\\
-\cline{3-17}&  & Accuracy & P & R & F1 & Equalized Odds & Accuracy & P & R & F1 & Equalized Odds & Accuracy & P & R & F1 & Equalized Odds \\
-\hline\multirow{6}{*}{Catboost} & \multirow{2}{*}{Adult} & 0.915 & 0.874 & 0.262 & 0.403 & 0.000 & 0.770 & 0.907 & 0.276 & 0.423 & 0.000 & 0.818 & 0.902 & 0.274 & 0.420 & 0.027 \\
- &  & (0.002) & (0.020) & (0.016) & (0.020) & (0.000) & (0.006) & (0.014) & (0.011) & (0.014) & (0.000) & (0.004) & (0.012) & (0.010) & (0.012) & (0.015) \\
- & \multirow{2}{*}{Augmented Adult (CART)} & 0.882 & 0.479 & 0.776 & 0.592 & 0.000 & 0.709 & 0.514 & 0.875 & 0.647 & 0.000 & 0.766 & 0.509 & 0.860 & 0.639 & 0.358 \\
- &  & (0.010) & (0.028) & (0.020) & (0.019) & (0.000) & (0.006) & (0.009) & (0.011) & (0.007) & (0.000) & (0.007) & (0.010) & (0.012) & (0.008) & (0.021) \\
- & \multirow{2}{*}{Augmented Adult (SMOTENC)} & 0.890 & 0.500 & 0.746 & 0.598 & 0.000 & 0.713 & 0.519 & 0.857 & 0.646 & 0.000 & 0.772 & 0.516 & 0.841 & 0.639 & 0.370 \\
- &  & (0.004) & (0.017) & (0.012) & (0.013) & (0.000) & (0.007) & (0.008) & (0.015) & (0.004) & (0.000) & (0.004) & (0.007) & (0.013) & (0.004) & (0.033) \\
-\hline
-\multirow{6}{*}{Decission Tree} & \multirow{2}{*}{Adult} & 0.893 & 0.510 & 0.569 & 0.537 & 0.000 & 0.774 & 0.629 & 0.632 & 0.631 & 0.000 & 0.813 & 0.609 & 0.623 & 0.616 & 0.160 \\
- &  & (0.005) & (0.024) & (0.023) & (0.018) & (0.000) & (0.005) & (0.008) & (0.014) & (0.009) & (0.000) & (0.004) & (0.009) & (0.013) & (0.007) & (0.022) \\
- & \multirow{2}{*}{Augmented Adult (CART)} & 0.843 & 0.385 & 0.718 & 0.501 & 0.000 & 0.747 & 0.569 & 0.710 & 0.632 & 0.000 & 0.779 & 0.531 & 0.711 & 0.608 & 0.110 \\
- &  & (0.007) & (0.019) & (0.012) & (0.016) & (0.000) & (0.005) & (0.011) & (0.011) & (0.008) & (0.000) & (0.003) & (0.009) & (0.010) & (0.006) & (0.013) \\
- & \multirow{2}{*}{Augmented Adult (SMOTENC)} & 0.840 & 0.382 & 0.736 & 0.503 & 0.000 & 0.741 & 0.558 & 0.745 & 0.638 & 0.000 & 0.774 & 0.522 & 0.743 & 0.613 & 0.131 \\
- &  & (0.007) & (0.020) & (0.019) & (0.020) & (0.000) & (0.006) & (0.009) & (0.011) & (0.007) & (0.000) & (0.005) & (0.008) & (0.010) & (0.007) & (0.018) \\
-\hline
-\multirow{6}{*}{Random Forest} & \multirow{2}{*}{Adult} & 0.928 & 0.733 & 0.545 & 0.625 & 0.000 & 0.817 & 0.734 & 0.630 & 0.678 & 0.000 & 0.854 & 0.734 & 0.617 & 0.670 & 0.161 \\
- &  & (0.003) & (0.024) & (0.010) & (0.013) & (0.000) & (0.004) & (0.011) & (0.009) & (0.007) & (0.000) & (0.003) & (0.011) & (0.008) & (0.006) & (0.013) \\
- & \multirow{2}{*}{Augmented Adult (CART)} & 0.884 & 0.482 & 0.780 & 0.596 & 0.000 & 0.794 & 0.635 & 0.767 & 0.695 & 0.000 & 0.824 & 0.606 & 0.769 & 0.678 & 0.108 \\
- &  & (0.005) & (0.020) & (0.015) & (0.016) & (0.000) & (0.003) & (0.010) & (0.008) & (0.006) & (0.000) & (0.003) & (0.010) & (0.007) & (0.006) & (0.016) \\
- & \multirow{2}{*}{Augmented Adult (SMOTENC)} & 0.888 & 0.493 & 0.774 & 0.602 & 0.000 & 0.788 & 0.623 & 0.775 & 0.690 & 0.000 & 0.821 & 0.599 & 0.774 & 0.675 & 0.123 \\
- &  & (0.006) & (0.023) & (0.015) & (0.017) & (0.000) & (0.004) & (0.010) & (0.008) & (0.007) & (0.000) & (0.003) & (0.010) & (0.007) & (0.007) & (0.011) \\
-\hline
-\end{tabular}
-\caption{Comparison}
-\label{tab:eval}
-\end{table}
-[?2004h(samplestructures) [01;32mluser@uni0100v0r-olipan[00m:[01;34m~/FairAugment/util[00m$ [?2004ltimed out waiting for input: auto-logout
