@@ -3,24 +3,32 @@ import pandas as pd
 from synthpop import Synthpop
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
+from sklearn.impute import SimpleImputer
+
 import matplotlib.pyplot as plt
 from .our_smote import SMOTENC_GENERATIVE
 import numpy as np
 from sdv.single_table import TVAESynthesizer
 from sdv.metadata import SingleTableMetadata
 
-from src.mdgmm.utils_methods import encode, get_var_metadata, post_process, transform_df_to_json, generate_plots
-from src.mdgmm.init_params import dim_reduce_init
-from src.mdgmm.data_preprocessing import compute_nj
-from src.mdgmm.MIAMI import MIAMI
 from scipy.spatial.distance import pdist, squareform
+from sklearn.pipeline import Pipeline
+
+from definitions import PositiveOrdinalEncoder
+
+from sdv.single_table import GaussianCopulaSynthesizer
+from sdv.single_table import CTGANSynthesizer
 
 
 class Dataset():
-    def __init__(self, dataset_name, binary_features=True, ignore_features=["fnlwgt"]):
+    def __init__(self, dataset_name, binary_features=False, ignore_features=[], protected_attribute="sex"):
         self.binary_features = binary_features
         self.ignore_features = ignore_features
+        self.protected_attribute = protected_attribute
+
+
         dataframe = self.load_dataset(dataset_name)
+
 
     def encode(self, df, keep_dtypes=False):
         df_encoded = df.copy()
@@ -44,17 +52,58 @@ class Dataset():
     def load_dataset(self, dataset_name):
 
         if dataset_name == "adult":
-            url = "https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
-            column_names_original = [
-                "age", "workclass", "fnlwgt", "education", "education-num", "marital-status",
-                "occupation", "relationship", "race", "sex", "capital-gain", "capital-loss",
-                "hours-per-week", "native-country", "income"
-            ]
+            self.ignore_features += ["fnlwgt", "educational-num"]
+            url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/adult-clean.csv"
+
+            target = "Class-label"
+
+            folder_path = "datasets/{}".format(dataset_name)
+
+            if len(self.ignore_features) > 0:
+                dataset_name += "_" + "_".join(self.ignore_features)
+
+            json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
+
+            # Check if the folder exists, if not, create it
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            # Check if the JSON file exists locally
+            if not os.path.isfile(json_file_path):
+                # File does not exist locally, download the CSV dataset
+                df = pd.read_csv(url)
+                num_rows_with_nan = df.isnull().sum(axis=1).gt(0).sum()
+                print("Number of rows containing NaN values:", num_rows_with_nan)
+
+                df = df.drop(self.ignore_features, axis="columns")
+
+                imputer = SimpleImputer(strategy='most_frequent')
+
+                # df = df.dropna(axis=1, how='all')  # Drop columns that contain all NaN values
+
+                # print(df.shape)
+                # df = df.dropna()                
+                df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+
+                if df.isnull().values.any() or df.empty:
+                    print("Nan in synthetic")
+                    exit(1)
+                # Save the data to the specified file path as JSON
+                df.to_json(json_file_path, orient='records', lines=True)
+            else:
+                # JSON file already exists locally, load it directly
+                df = pd.read_json(json_file_path, orient='records', lines=True)
+
+            df.rename(columns={'gender': 'sex'}, inplace=True)
+
+
             self.dtype_map = {
                 "age": "int",
                 "workclass": "category",
                 "fnlwgt": "int", 
                 "education": "category",
+                "educational-num": "category",
                 "marital-status": "category",
                 "occupation": "category", 
                 "relationship": "category", 
@@ -64,67 +113,405 @@ class Dataset():
                 "capital-loss": "int",
                 "hours-per-week": "int", 
                 "native-country": "category", 
-                "income": "category"
+                "Class-label": "category"
             }
             if len(self.ignore_features)>0:
                 for rem_feat in self.ignore_features:
                     self.dtype_map.pop(rem_feat)
+            # self.dtype_map = {}
+            # for column, dtype in df.dtypes.items():
+            #     if pd.api.types.is_numeric_dtype(dtype):
+            #         self.dtype_map[column] = "int"
+            #     else:
+            #         self.dtype_map[column] = "category"
 
             self.column_names = list(self.dtype_map.keys())
             # Extract categorical column names
-            self.categorical_cols = [col for col, dtype in self.dtype_map.items() if dtype == "category"]
-            self.categorical_input_cols = self.categorical_cols.copy()
 
-            self.continuous_input_cols = [col for col in self.column_names if col not in self.categorical_cols]
 
-            self.categorical_input_cols.remove("income")
+        elif dataset_name == "compas":
+            self.ignore_features += ["id", "age_cat", "priors_count.1", "violent_recid"]
+            url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/compas-scores-two-years_clean.csv"
+            target = "two_year_recid"
 
-            self.binary_cols = ["native-country", "race"]
+            # Define the file path where you want to save the data
+            folder_path = "datasets/{}".format(dataset_name)
+
+            if len(self.ignore_features) > 0:
+                dataset_name += "_" + "_".join(self.ignore_features)
+
+            json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
+
+            # Check if the folder exists, if not, create it
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            # Check if the JSON file exists locally
+            if not os.path.isfile(json_file_path):
+                # File does not exist locally, download the CSV dataset
+                df = pd.read_csv(url)
+                num_rows_with_nan = df.isnull().sum(axis=1).gt(0).sum()
+                print("Number of rows containing NaN values:", num_rows_with_nan)
+
+                df = df.drop(self.ignore_features, axis="columns")
+
+                imputer = SimpleImputer(strategy='most_frequent')
+
+                # df = df.dropna(axis=1, how='all')  # Drop columns that contain all NaN values
+
+                # print(df.shape)
+                # df = df.dropna()                
+                df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+
+                if df.isnull().values.any() or df.empty:
+                    print("Nan in synthetic")
+                    exit(1)
+                # Save the data to the specified file path as JSON
+                df.to_json(json_file_path, orient='records', lines=True)
+            else:
+                # JSON file already exists locally, load it directly
+                df = pd.read_json(json_file_path, orient='records', lines=True)
+
+            self.dtype_map = {
+                'id': 'int', 
+                'name': 'category', 
+                'first': 'category', 
+                'last': 'category', 
+                'compas_screening_date': 'category', 
+                'sex': 'category', 
+                'dob': 'category', 
+                'age': 'int', 
+                'age_cat': 'category', 
+                'race': 'category', 
+                'juv_fel_count': 'int', 
+                'decile_score': 'int', 
+                'juv_misd_count': 'int', 
+                'juv_other_count': 'int', 
+                'priors_count': 'int', 
+                'days_b_screening_arrest': 'int', 
+                'c_jail_in': 'category', 
+                'c_jail_out': 'category', 
+                'c_case_number': 'category', 
+                'c_offense_date': 'category', 
+                'c_arrest_date': 'category', 
+                'c_days_from_compas': 'int', 
+                'c_charge_degree': 'category', 
+                'c_charge_desc': 'category', 
+                'is_recid': 'category', 
+                'r_case_number': 'category', 
+                'r_charge_degree': 'category', 
+                'r_days_from_arrest': 'int', 
+                'r_offense_date': 'category', 
+                'r_charge_desc': 'category', 
+                'r_jail_in': 'category', 
+                'r_jail_out': 'category', 
+                'violent_recid': 'int', 
+                'is_violent_recid': 'category', 
+                'vr_case_number': 'category', 
+                'vr_charge_degree': 'category', 
+                'vr_offense_date': 'category', 
+                'vr_charge_desc': 'category', 
+                'type_of_assessment': 'category', 
+                'decile_score.1': 'int', 
+                'score_text': 'category', 
+                'screening_date': 'category', 
+                'v_type_of_assessment': 'category', 
+                'v_decile_score': 'int', 
+                'v_score_text': 'category', 
+                'v_screening_date': 'category', 
+                'in_custody': 'category', 
+                'out_custody': 'category', 
+                'priors_count.1': 'int', 
+                'start': 'int', 
+                'end': 'int', 
+                'event': 'int', 
+                'two_year_recid': 'category'
+            }
+
+            if len(self.ignore_features)>0:
+                for rem_feat in self.ignore_features:
+                    self.dtype_map.pop(rem_feat)
+            # self.dtype_map = {}
+            # for column, dtype in df.dtypes.items():
+            #     if pd.api.types.is_numeric_dtype(dtype):
+            #         self.dtype_map[column] = "int"
+            #     else:
+            #         self.dtype_map[column] = "category"
+
+            self.column_names = list(self.dtype_map.keys())
+            # Extract categorical column names
+
+
+        elif dataset_name == "dutch":
+            url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/dutch.csv"
+            target = "occupation"
+
+            # Define the file path where you want to save the data
+            folder_path = "datasets/{}".format(dataset_name)
+
+            if len(self.ignore_features) > 0:
+                dataset_name += "_" + "_".join(self.ignore_features)
+
+            json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
+
+            # Check if the folder exists, if not, create it
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            # Check if the JSON file exists locally
+            if not os.path.isfile(json_file_path):
+                # File does not exist locally, download the CSV dataset
+                df = pd.read_csv(url)
+                num_rows_with_nan = df.isnull().sum(axis=1).gt(0).sum()
+                print("Number of rows containing NaN values:", num_rows_with_nan)
+
+                df = df.drop(self.ignore_features, axis="columns")
+
+                imputer = SimpleImputer(strategy='most_frequent')
+
+                # df = df.dropna(axis=1, how='all')  # Drop columns that contain all NaN values
+
+                # print(df.shape)
+                # df = df.dropna()                
+                df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+
+                if df.isnull().values.any() or df.empty:
+                    print("Nan in synthetic")
+                    exit(1)
+
+                # df["dummy"] = 0.0
+                # Save the data to the specified file path as JSON
+                df.to_json(json_file_path, orient='records', lines=True)
+            else:
+                # JSON file already exists locally, load it directly
+                df = pd.read_json(json_file_path, orient='records', lines=True)
+
+            self.dtype_map = {
+                'sex': 'category', 
+                'age': 'category', 
+                'household_position': 'category', 
+                'household_size': 'category', 
+                'prev_residence_place': 'category', 
+                'citizenship': 'category', 
+                'country_birth': 'category', 
+                'edu_level': 'category', 
+                'economic_status': 'category', 
+                'cur_eco_activity': 'category', 
+                'marital_status': 'category', 
+                'occupation': 'category', 
+                "dummy": 'int'
+            }
+
+            if len(self.ignore_features)>0:
+                for rem_feat in self.ignore_features:
+                    self.dtype_map.pop(rem_feat)
+            # self.dtype_map = {}
+            # for column, dtype in df.dtypes.items():
+            #     if pd.api.types.is_numeric_dtype(dtype):
+            #         self.dtype_map[column] = "int"
+            #     else:
+            #         self.dtype_map[column] = "category"
+
+            self.column_names = list(self.dtype_map.keys())
+            # Extract categorical column names
+
+
+        elif dataset_name == "german":
+            url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/german_data_credit.csv"
+
+            target = "class-label"
+
+            # Define the file path where you want to save the data
+            folder_path = "datasets/{}".format(dataset_name)
+
+            if len(self.ignore_features) > 0:
+                dataset_name += "_" + "_".join(self.ignore_features)
+
+            json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
+
+            # Check if the folder exists, if not, create it
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            # Check if the JSON file exists locally
+            if not os.path.isfile(json_file_path):
+                # File does not exist locally, download the CSV dataset
+                df = pd.read_csv(url)
+                num_rows_with_nan = df.isnull().sum(axis=1).gt(0).sum()
+                print("Number of rows containing NaN values:", num_rows_with_nan)
+
+                df = df.drop(self.ignore_features, axis="columns")
+
+                imputer = SimpleImputer(strategy='most_frequent')
+
+                # df = df.dropna(axis=1, how='all')  # Drop columns that contain all NaN values
+
+                # print(df.shape)
+                # df = df.dropna()                
+                df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+
+                if df.isnull().values.any() or df.empty:
+                    print("Nan in synthetic")
+                    exit(1)
+                # Save the data to the specified file path as JSON
+                df.to_json(json_file_path, orient='records', lines=True)
+            else:
+                # JSON file already exists locally, load it directly
+                df = pd.read_json(json_file_path, orient='records', lines=True)
+
+
+            self.dtype_map = {
+                'checking-account': 'category', 
+                'duration': 'int', 
+                'purpose': 'category',
+                'credit-history': 'category', 
+                'credit-amount': 'int', 
+                'savings-account': 'category', 
+                'employment-since': 'category', 
+                'installment-rate': 'int', 
+                'other-debtors': 'category', 
+                'residence-since': 'int', 
+                'property': 'category', 
+                'age': 'int', 
+                'other-installment': 'category', 
+                'housing': 'category', 
+                'existing-credits': 'int', 
+                'job': 'category', 
+                'numner-people-provide-maintenance-for': 'int', 
+                'telephone': 'category', 
+                'foreign-worker': 'category', 
+                'sex': 'category', 
+                'marital-status': 'category', 
+                'class-label': 'category', 
+            }
+
+            if len(self.ignore_features)>0:
+                for rem_feat in self.ignore_features:
+                    self.dtype_map.pop(rem_feat)
+            # self.dtype_map = {}
+            # for column, dtype in df.dtypes.items():
+            #     if pd.api.types.is_numeric_dtype(dtype):
+            #         self.dtype_map[column] = "int"
+            #     else:
+            #         self.dtype_map[column] = "category"
+
+            self.column_names = list(self.dtype_map.keys())
+            # Extract categorical column names
+
+        elif dataset_name == "credit":
+            url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/credit-card-clients.csv"
+
+            target = "default payment"
+
+            self.dtype_map = {
+                "limit_bal": "int",
+                "sex": "category",
+                "education": "category",
+                "marriage": "category",
+                "age": "int",
+                "pay_0": "category",
+                "pay_2": "category",
+                "pay_3": "category",
+                "pay_4": "category",
+                "pay_5": "category",
+                "pay_6": "category",
+                "bill_amt1": "int",
+                "bill_amt2": "int",
+                "bill_amt3": "int",
+                "bill_amt4": "int",
+                "bill_amt5": "int",
+                "bill_amt6": "int",
+                "pay_amt1": "int",
+                "pay_amt2": "int",
+                "pay_amt3": "int",
+                "pay_amt4": "int",
+                "pay_amt5": "int",
+                "pay_amt6": "int",
+                "default payment": "category"
+            }
+
+            if len(self.ignore_features)>0:
+                for rem_feat in self.ignore_features:
+                    self.dtype_map.pop(rem_feat)
+            # self.dtype_map = {}
+            # for column, dtype in df.dtypes.items():
+            #     if pd.api.types.is_numeric_dtype(dtype):
+            #         self.dtype_map[column] = "int"
+            #     else:
+            #         self.dtype_map[column] = "category"
+
+            self.column_names = list(self.dtype_map.keys())
+            # Extract categorical column names
+            categorical_cols = [col for col, dtype in self.dtype_map.items() if dtype == "category"]
+
+
+
+
+            # Define the file path where you want to save the data
+            folder_path = "datasets/{}".format(dataset_name)
+
+            if len(self.ignore_features) > 0:
+                dataset_name += "_" + "_".join(self.ignore_features)
+
+            if dataset_name == "credit":
+                json_file_path = os.path.join(folder_path, "{}_transformed_positive_categorical.json".format(dataset_name))
+            else:
+                json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
+
+            # Check if the folder exists, if not, create it
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            # Check if the JSON file exists locally
+            if not os.path.isfile(json_file_path):
+                # File does not exist locally, download the CSV dataset
+                df = pd.read_csv(url)
+                df = df.rename(columns=lambda x: x.lower())
+
+                num_rows_with_nan = df.isnull().sum(axis=1).gt(0).sum()
+                print("Number of rows containing NaN values:", num_rows_with_nan)
+
+                df = df.drop(self.ignore_features, axis="columns")
+
+                # imputer = SimpleImputer(strategy='most_frequent')
+
+                # # df = df.dropna(axis=1, how='all')  # Drop columns that contain all NaN values
+
+                # # print(df.shape)
+                # # df = df.dropna()                
+                # df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+
+                if df.isnull().values.any() or df.empty:
+                    print("Nan in synthetic")
+                    exit(1)
+
+                categorical_transformer_lgbm = Pipeline(steps=[
+                    ('ordinal', PositiveOrdinalEncoder(categorical_cols))
+                    ])
+
+                transformations_positive_cat = ColumnTransformer(
+                    transformers=[
+                        ('all', categorical_transformer_lgbm, df.columns),
+                    ])
+                transformed_positive_vals = transformations_positive_cat.fit_transform(df)
+
+                df = pd.DataFrame(transformed_positive_vals, columns=df.columns)
+
+                df.to_json(json_file_path, orient='records', lines=True)
+                # Save the data to the specified file path as JSON
+                # df.to_json(json_file_path, orient='records', lines=True)
+            else:
+                # JSON file already exists locally, load it directly
+                df = pd.read_json(json_file_path, orient='records', lines=True)
+            
 
         else:
             print("Dataset not supported")
             exit(1)
-
-
-        # Define the file path where you want to save the data
-        folder_path = "datasets/{}".format(dataset_name)
-
-        if self.binary_features:
-            dataset_name += "_binary"
-        if len(self.ignore_features)>0:
-            dataset_name += "_" + "_".join(self.ignore_features)
-
-
-        json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
-
-        # Check if the folder exists, if not, create it
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
-
-        # Check if the JSON file exists locally
-        if not os.path.isfile(json_file_path):
-            # File does not exist locally, download the CSV dataset
-
-            df = pd.read_csv(url, names=column_names_original, na_values=' ?', skipinitialspace=True)
-            # Drop columns that are not in self.column_names
-            df = df.drop(columns=[col for col in df.columns if col not in self.column_names])
-
-            if self.binary_features:
-                df['race'] = df['race'].apply(lambda x: x.strip() if x.strip() == 'White' else 'Other')
-
-                # Preprocess "native-country" feature
-                df['native-country'] = df['native-country'].apply(lambda x: x.strip() if x.strip() == 'United-States' else 'Other')
-
-            # Save the data to the specified file path as JSON
-            df.to_json(json_file_path, orient='records', lines=True)
-        else:
-            # JSON file already exists locally, load it directly
-            df = pd.read_json(json_file_path, orient='records', lines=True)
-
-
-    
-        # Applying get_dummies for categorical columns
-        # df_transformed = self.encode(df)
 
         self.original_mappings = {}
         for column, dtype in self.dtype_map.items():
@@ -140,25 +527,52 @@ class Dataset():
         # Display the first few rows of the dataset
         self.original_dataframe = df.copy()
         self.original_dataframe_encoded = self.encode(df).copy()
+
+        self.target = target
+
+        df_dummy_drop = df.copy()
+        df_dummy_drop = df_dummy_drop.drop(columns=[target, self.protected_attribute])
+
+        self.categorical_input_cols = [col for col in df_dummy_drop.columns if self.dtype_map[col] == "category"]
+
+        self.continuous_input_cols = [col for col in df_dummy_drop if col not in self.categorical_input_cols]
+
+        self.categorical_input_col_locations = [df_dummy_drop.columns.get_loc(col) for col in self.categorical_input_cols]
+
+
+        categorical_count, numerical_count = sum(1 for dtype in self.dtype_map.values() if dtype == "category"), sum(1 for dtype in self.dtype_map.values() if dtype in ["int", "float"])
+        print("Dataset {} has {} categorical and {} numerical columns.".format(dataset_name, self.categorical_input_cols, self.continuous_input_cols))
         return self
+
+
+
 
     def get_synthesizer_method(self, name, dataframe, random_state=42):
         if name=="cart":
             synthesizer = Synthpop(seed=random_state)
             arguments = {"dtypes": {col: dtype for col, dtype in self.dtype_map.items() if col in dataframe.columns}}
-        if name=="smote":
+        elif name=="smote":
             cat_cols = [col for col in self.categorical_input_cols if col in dataframe.columns]
             synthesizer = SMOTENC_GENERATIVE(categorical_features=cat_cols, random_state=random_state)
             arguments = {}
-        if name=="tvae":
+        elif name=="tvae":
             cat_cols = [col for col in self.categorical_input_cols if col in dataframe.columns]
             metadata = SingleTableMetadata()
             metadata.detect_from_dataframe(dataframe)
             synthesizer = TVAESynthesizer(metadata)
             arguments = {}
-        if name=="mdgmm":
-            return None, None
-
+        elif name=="gaussian_copula":
+            metadata = SingleTableMetadata()
+            metadata.detect_from_dataframe(dataframe)
+            synthesizer = GaussianCopulaSynthesizer(metadata)    
+            arguments = {}
+        elif name=="ctgan":
+            metadata = SingleTableMetadata()
+            metadata.detect_from_dataframe(dataframe)
+            synthesizer = CTGANSynthesizer(metadata)    
+            arguments = {}  
+        else:
+            print(name, "method not supported")
             
         return synthesizer, arguments
 
@@ -177,48 +591,9 @@ class Dataset():
         return synthesizer
 
     def generate_data(self, synthesizer, num=100, name="", decode=True, dataframe=[], random_state=42):
-        if name=="tvae":
-            synthesizer._set_random_state(random_state)
+        if name=="tvae" or name=="ctgan" or name=="gaussian_copula":
+            # synthesizer._set_random_state(random_state)
             synthetic_data = synthesizer.sample(int(num))
-        elif name=="mdgmm":
-            dataframe = self.encode(dataframe)
-            var_distrib, var_transform_only, le_dict = get_var_metadata(dataframe, self.binary_cols)
-            p = dataframe.shape[1]
-            dtypes_dict_famd = {'continuous': float, 'categorical': str, 'ordinal': str,\
-              'bernoulli': str, 'binomial': str}
-            
-            dtype = {dataframe.columns[j]: dtypes_dict_famd[var_transform_only[j]] for j in range(p)}
-            dataframe_famd = dataframe.astype(dtype, copy=True)
-
-            nj, nj_bin, nj_ord, nj_categ = compute_nj(dataframe, var_distrib)
-
-            n_clusters = 3
-            r = np.array([2, 1])
-            k = [n_clusters]
-            # Feature category (cf)
-
-            
-            
-
-
-            authorized_ranges = None
-
-            init, transformed_famd_data, famd  = dim_reduce_init(dataframe_famd, n_clusters, k, r, nj, var_distrib, seed = 2023, use_light_famd=True)
-            distances = pdist(transformed_famd_data)
-
-            dm = squareform(distances)
-
-            discrete_features = self.categorical_input_cols
-            target_nb_pseudo_obs= int(num)
-            eps = 1E-10
-            it = 1000
-            maxstep = 1000
-            seed = 2023
-
-            out = MIAMI(dataframe, n_clusters, r, k, init, var_distrib, nj, le_dict, authorized_ranges, discrete_features, dtype, target_nb_pseudo_obs=target_nb_pseudo_obs, it=it,\
-                eps=eps, maxstep=maxstep, seed=seed, perform_selec = True, dm = dm, max_patience = 0)
-
-            synthetic_data = pd.DataFrame(out['y_all'], columns = dataframe.columns) 
         else:
             synthetic_data = synthesizer.generate(int(num))
 

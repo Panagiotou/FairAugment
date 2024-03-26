@@ -8,7 +8,17 @@ from sklearn.model_selection import cross_val_score, RepeatedKFold
 from sklearn.exceptions import NotFittedError
 import copy
 import warnings
+import click
 
+class ClickPythonLiteralOption(click.Option):
+
+    def type_cast_value(self, ctx, value):
+        try:
+            return ast.literal_eval(value)
+        except Exception as e:
+            print(e)
+            raise click.BadParameter(value)
+        
 # Suppress LightGBM categorical_feature warning
 warnings.filterwarnings("ignore", category=UserWarning, message="categorical_feature keyword has been found*")
 warnings.filterwarnings("ignore", category=UserWarning, message="categorical_feature in param dict is overridden*")
@@ -38,69 +48,105 @@ if RUN_GPU:
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder
 from sklearn.base import BaseEstimator
 from lightgbm import LGBMClassifier
 
-
-adult_dataset_generator = Dataset("adult")
-all_data = adult_dataset_generator.original_dataframe.copy()
-
-
 from definitions import *
 
-problem_classification = {"metrics":[accuracy_score, f1_score, roc_auc_score],
-                      "metric_names":["Accuracy", "F1", "ROC AUC"],
-                      "fairness_metrics": [eq_odd],
-                      "fairness_metric_names": ["Equalized odds"],
-                      "generative_methods": ["tvae", "cart", "smote"],}
-                      
+@click.command()
+@click.option('--dataset', default="adult", help="Dataset", type=str)
+@click.option('--sampling_method', default="class_protected", help="Sampling method", type=str)
+@click.option('--protected_attribute', default="sex", help="Protected attribute", type=str)
+def run(dataset, sampling_method, protected_attribute):
+            
+    # if not os.path.exists("../results/{}/".format(dataset):
+    #     os.makedirs("../results/{}/".format(dataset)
+
+    if not os.path.exists("../results/{}/arrays/".format(dataset)):
+        os.makedirs("../results/{}/arrays/".format(dataset))
+
+    print("Running", dataset, sampling_method, protected_attribute)
+
+    dataset_generator = Dataset(dataset)
+    all_data = dataset_generator.original_dataframe.copy()
+
+    column_types_map = [dataset_generator.dtype_map[col] for col in all_data.columns]
+
+    # Check if all columns have the data type 'category'
+    all_categorical = all(dtype == 'category' for dtype in column_types_map)
+
+    generative_methods = ["tvae", "cart", "smote"]
+    if all_categorical:
+        print("Only categorical features, dropping SMOTE")
+        generative_methods.remove("smote")
+
+    problem_classification = {"metrics":[accuracy_score, f1_score, roc_auc_score],
+                        "metric_names":["Accuracy", "F1", "ROC AUC"],
+                        "fairness_metrics": [eq_odd],
+                        "fairness_metric_names": ["Equalized odds"],
+                        "generative_methods":generative_methods}
+                        
 
 
 
-# We create the preprocessing pipelines for both numeric and categorical data.
-numeric_transformer = Pipeline(steps=[
-    ('scaler', StandardScaler())])
+    # We create the preprocessing pipelines for both numeric and categorical data.
+    numeric_transformer = Pipeline(steps=[
+        ('scaler', StandardScaler())])
 
-categorical_transformer = Pipeline(steps=[
-    ('onehot', OneHotEncoder(handle_unknown='ignore'))])
-
-
-categorical_cols = adult_dataset_generator.categorical_input_cols.copy()
-categorical_cols.remove("sex")
-
-transformations = ColumnTransformer(
-    transformers=[
-        ('num', numeric_transformer, adult_dataset_generator.continuous_input_cols),
-        ('cat', categorical_transformer, categorical_cols)])
+    categorical_transformer = Pipeline(steps=[
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))])
 
 
-# Append classifier to preprocessing pipeline.
-# Now we have a full prediction pipeline.
-clf_RF = Pipeline(steps=[('preprocessor', transformations),
-                      ('classifier', RandomForestClassifier(random_state=42))])
-clf_DT = Pipeline(steps=[('preprocessor', transformations),
-                    ('classifier', DecisionTreeClassifier(random_state=42))])     
+    # categorical_transformer_lgbm = Pipeline(steps=[
+    #     ('ordinal', PositiveOrdinalEncoder())
+    # ])
+
+    categorical_cols = dataset_generator.categorical_input_cols.copy()
+
+    transformations = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, dataset_generator.continuous_input_cols),
+            ('cat', categorical_transformer, categorical_cols)])
+
+    # transformations_lgbm = ColumnTransformer(
+    #     transformers=[
+    #         ('num', numeric_transformer, dataset_generator.continuous_input_cols),
+    #         ('cat', categorical_transformer_lgbm, categorical_cols)])
+    
+    # Append classifier to preprocessing pipeline.
+    # Now we have a full prediction pipeline.
+    clf_RF = Pipeline(steps=[('preprocessor', transformations),
+                        ('classifier', RandomForestClassifier(random_state=42))])
+    clf_DT = Pipeline(steps=[('preprocessor', transformations),
+                        ('classifier', DecisionTreeClassifier(random_state=42))])     
+
+    # clf_lgbm = Pipeline(steps=[('preprocessor', transformations_lgbm),
+    #                     ('classifier', LGBMClassifier(categorical_feature=dataset_generator.categorical_input_col_locations, verbose=-1))])  
+
+                        
+    model_names_classification = ["LightGBM", "XGBoost", "Decission Tree", "Random Forest"]
 
 
-model_names_classification = ["LightGBM", "XGBoost", "Catboost", "Decission Tree", "Random Forest"]
+    models_classification = [LGBMClassifier, xgb.XGBClassifier, clf_DT, clf_RF]
 
 
-models_classification = [LGBMClassifier, xgb.XGBClassifier, CatBoostClassifier, clf_DT, clf_RF]
 
-args = [{"categorical_feature":adult_dataset_generator.categorical_input_cols, "verbose":-1}, {"enable_categorical":True, "tree_method":'hist'}, {"random_state":42, "loss_function":"Logloss", "verbose":False, "iterations":100, "learning_rate":0.01, "cat_features":adult_dataset_generator.categorical_input_cols}, {}, {}]
+    args = [{"categorical_feature":dataset_generator.categorical_input_col_locations, "verbose":-1}, {"enable_categorical":True, "tree_method":'hist'}, {}, {}]
 
-problems_classification = []
-for model, name, arg in zip(models_classification, model_names_classification, args):
-    problem = problem_classification.copy()
-    problem["model"] = copy.deepcopy(model)
-    problem["model_name"] = name
-    problem["args"] = arg
-    problems_classification.append(problem)
-
-sampling_method = "class_protected"
-
-average, std, feat_imp_average, feat_imp_std = run_experiments(problems_classification, adult_dataset_generator, all_data, num_repeats = 5, num_folds = 3, protected_attributes = ["sex"], sampling_method=sampling_method)
+    problems_classification = []
+    for model, name, arg in zip(models_classification, model_names_classification, args):
+        problem = problem_classification.copy()
+        problem["model"] = copy.deepcopy(model)
+        problem["model_name"] = name
+        problem["args"] = arg
+        problems_classification.append(problem)
 
 
-np.savez('../results/arrays/arrays_{}.npz'.format(sampling_method), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
+    average, std, feat_imp_average, feat_imp_std = run_experiments(problems_classification, dataset_generator, all_data, num_repeats = 5, num_folds = 3, protected_attributes = [protected_attribute], sampling_method=sampling_method)
+
+
+    np.savez('../results/{}/arrays/arrays_{}.npz'.format(dataset, sampling_method), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
+
+if __name__ == '__main__':
+    run()

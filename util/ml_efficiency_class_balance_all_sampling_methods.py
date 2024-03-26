@@ -1,0 +1,154 @@
+import sys 
+sys.path.append("..")
+from src.dataset import Dataset
+import pandas as pd
+import os
+import numpy as np
+from sklearn.model_selection import cross_val_score, RepeatedKFold
+from sklearn.exceptions import NotFittedError
+import copy
+import warnings
+import click
+
+class ClickPythonLiteralOption(click.Option):
+
+    def type_cast_value(self, ctx, value):
+        try:
+            return ast.literal_eval(value)
+        except Exception as e:
+            print(e)
+            raise click.BadParameter(value)
+        
+# Suppress LightGBM categorical_feature warning
+warnings.filterwarnings("ignore", category=UserWarning, message="categorical_feature keyword has been found*")
+warnings.filterwarnings("ignore", category=UserWarning, message="categorical_feature in param dict is overridden*")
+
+
+RUN_GPU = False
+
+from fairlearn.metrics import demographic_parity_difference, demographic_parity_ratio, true_positive_rate_difference, true_positive_rate, false_positive_rate_difference
+
+def eq_odd(y_test, y_pred, group_test):
+    return true_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)\
+                + false_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)
+import warnings
+
+# Ignore FutureWarnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
+import xgboost as xgb
+
+from catboost import CatBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+if RUN_GPU:
+    from cuml import RandomForestClassifier, DecisionTreeClassifier
+
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder
+from sklearn.base import BaseEstimator
+from lightgbm import LGBMClassifier
+
+from definitions import *
+
+@click.command()
+@click.option('--dataset', default="adult", help="Dataset", type=str)
+@click.option('--protected_attribute', default="sex", help="Protected attribute", type=str)
+def run(dataset, protected_attribute):
+            
+    # if not os.path.exists("../results/{}/".format(dataset):
+    #     os.makedirs("../results/{}/".format(dataset)
+
+    if not os.path.exists("../results/{}/arrays/".format(dataset)):
+        os.makedirs("../results/{}/arrays/".format(dataset))
+
+    print("Running", dataset, protected_attribute)
+
+    dataset_generator = Dataset(dataset)
+    all_data = dataset_generator.original_dataframe.copy()
+
+    column_types_map = [dataset_generator.dtype_map[col] for col in all_data.columns]
+
+    # Check if all columns have the data type 'category'
+    all_categorical = all(dtype == 'category' for dtype in column_types_map)
+
+    # generative_methods = ["tvae", "cart", "smote"]
+    generative_methods = ["gaussian_copula", "ctgan", "tvae", "cart", "smote"]
+
+    if all_categorical:
+        print("Only categorical features, dropping SMOTE")
+        generative_methods.remove("smote")
+
+    problem_classification = {"metrics":[accuracy_score, f1_score, roc_auc_score],
+                        "metric_names":["Accuracy", "F1", "ROC AUC"],
+                        "fairness_metrics": [eq_odd],
+                        "fairness_metric_names": ["Equalized odds"],
+                        "generative_methods":generative_methods,
+                        "sampling_methods":['class', 'class_protected', 'protected', 'same_class']}
+                        
+
+
+
+    # We create the preprocessing pipelines for both numeric and categorical data.
+    numeric_transformer = Pipeline(steps=[
+        ('scaler', StandardScaler())])
+
+    categorical_transformer = Pipeline(steps=[
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))])
+
+
+    # categorical_transformer_lgbm = Pipeline(steps=[
+    #     ('ordinal', PositiveOrdinalEncoder())
+    # ])
+
+    categorical_cols = dataset_generator.categorical_input_cols.copy()
+
+    transformations = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, dataset_generator.continuous_input_cols),
+            ('cat', categorical_transformer, categorical_cols)])
+
+    # transformations_lgbm = ColumnTransformer(
+    #     transformers=[
+    #         ('num', numeric_transformer, dataset_generator.continuous_input_cols),
+    #         ('cat', categorical_transformer_lgbm, categorical_cols)])
+    
+    # Append classifier to preprocessing pipeline.
+    # Now we have a full prediction pipeline.
+    clf_RF = Pipeline(steps=[('preprocessor', transformations),
+                        ('classifier', RandomForestClassifier(random_state=42))])
+    clf_DT = Pipeline(steps=[('preprocessor', transformations),
+                        ('classifier', DecisionTreeClassifier(random_state=42))])     
+
+    # clf_lgbm = Pipeline(steps=[('preprocessor', transformations_lgbm),
+    #                     ('classifier', LGBMClassifier(categorical_feature=dataset_generator.categorical_input_col_locations, verbose=-1))])  
+
+                        
+    model_names_classification = ["LightGBM", "XGBoost", "Decission Tree", "Random Forest"]
+
+
+    models_classification = [LGBMClassifier, xgb.XGBClassifier, clf_DT, clf_RF]
+
+
+
+    args = [{"categorical_feature":dataset_generator.categorical_input_col_locations, "verbose":-1}, {"enable_categorical":True, "tree_method":'hist'}, {}, {}]
+
+    problems_classification = []
+    for model, name, arg in zip(models_classification, model_names_classification, args):
+        problem = problem_classification.copy()
+        problem["model"] = copy.deepcopy(model)
+        problem["model_name"] = name
+        problem["args"] = arg
+        problems_classification.append(problem)
+
+
+    average, std, feat_imp_average, feat_imp_std = run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = 5, num_folds = 3, protected_attributes = [protected_attribute])
+
+    print(average.shape)
+    np.savez('../results/{}/arrays/arrays_all_models.npz'.format(dataset), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
+
+if __name__ == '__main__':
+    run()

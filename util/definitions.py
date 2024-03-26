@@ -2,13 +2,176 @@ from sklearn.model_selection import cross_val_score, RepeatedKFold
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder
 from sklearn.base import BaseEstimator
 import numpy as np 
 import pandas as pd
 from catboost import Pool
 from sklearn import tree
 import graphviz
+import regex as re
+
+class PositiveOrdinalEncoder:
+    def __init__(self, categorical_cols):
+        self.mapping = {}
+        self.categorical_cols = categorical_cols
+
+    def fit(self, data, labels=None):
+        self.mapping = {}
+        for column_name in self.categorical_cols:
+            column = data[column_name]
+            unique_values = set(column)
+            unique_values = sorted(list(unique_values), key=lambda x: (isinstance(x, int), x))
+            mapping = {value: index for index, value in enumerate(unique_values)}
+            self.mapping[column_name] = mapping
+
+    def transform(self, data, labels=None):
+        transformed_data = data.copy()
+        for column_name in self.categorical_cols:
+            column = data[column_name]
+            transformed_data[column_name] = data[column_name].map(self.mapping[column_name])
+
+        transformed_data = np.array(transformed_data)
+        return transformed_data
+
+    def fit_transform(self, data, labels):
+        self.fit(data, labels)
+        return self.transform(data, labels)
+
+
+
+def get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny"):
+    avgs_stds_c = ""
+    for j in range(len(names_test)):
+        test_name = names_test[j]
+        avg_metric = all_metrics_mean[problem_i][index][j]
+        std_metric = all_metrics_std[problem_i][index][j]
+        avg_metric = ["{:.3f}".format(x) for x in avg_metric]
+        std_metric = ["{:.3f}".format(x) for x in std_metric]
+
+        for idx in range(len(avg_metric)):
+            if avg_metric[idx] == max_of_each_column[idx] and metrics_optimal[idx]=="max":
+                avg_metric[idx] = '\\textbf{' + avg_metric[idx] + '}'
+            if avg_metric[idx] == min_of_each_column[idx] and metrics_optimal[idx]=="min":
+                avg_metric[idx] = '\\textbf{' + avg_metric[idx] + '}'
+
+            if avg_metric[idx] == second_max_of_each_column[idx] and metrics_optimal[idx]=="max":
+                        avg_metric[idx] = '\\underline{' + avg_metric[idx] + '}'
+
+            if avg_metric[idx] == second_min_of_each_column[idx] and metrics_optimal[idx]=="min":
+                avg_metric[idx] = '\\underline{' + avg_metric[idx] + '}'
+
+        avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
+    return avgs_stds_c
+
+def get_max_min(all_m):
+    rounded_arr = np.round(all_m, 3)
+
+    max_of_each_column = np.max(rounded_arr, axis=0)[0]
+    min_of_each_column = np.min(rounded_arr, axis=0)[0]
+
+    data_max = rounded_arr.copy()
+    data_min = rounded_arr.copy()
+
+    data_max[data_max == max_of_each_column] = -np.inf
+    data_min[data_min == min_of_each_column] = +np.inf
+
+    second_max_of_each_column = np.max(data_max, axis=0)[0]
+    second_min_of_each_column = np.min(data_max, axis=0)[0]
+
+    second_max_of_each_column[np.isneginf(second_max_of_each_column)] = max_of_each_column[np.isneginf(second_max_of_each_column)]
+    second_min_of_each_column[np.isinf(second_min_of_each_column)] = min_of_each_column[np.isinf(second_min_of_each_column)]
+
+    return max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column
+
+def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name=""):
+    
+    sampling_methods = problems[0]["sampling_methods"]
+    if test_data:
+        all_cols =  str(len(metric_names_actual) * len(names_test))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
+    latex_table = "\\begin{table*}[h]\n"
+    latex_table += "\\caption{{{}}}\n".format(dataset_name)
+    latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+    latex_table += "\\centering\n"
+    # latex_table += "\\scalebox{0.70}{\n"
+    latex_table += "\\begin{tabular}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    latex_table += "\\hline\n"
+
+    latex_table += "\\clf & \\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
+    # latex_table += "& "
+    # for name_t in names_test:
+    #     latex_table +=" & \multicolumn{" + str(len(metric_names_actual)) + "}{c}{" + name_t + "}"
+    # latex_table += "\\\\\n"
+    latex_table += "\cline{4-" + str(3+len(metric_names_actual)) +"}"
+    # latex_table +=  "& & " + " & ".join(metric_names_actual) + " & " + " & ".join(metric_names_actual) + " \\\\\n"
+    latex_table +=  "& & " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(names_test))]) + " \\\\\n"
+
+
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
+
+    for problem_i in range(len(problems)):
+        # print(problems[problem_i]["model_name"])
+        latex_table += "\\multirow{" + str(len(sampling_methods)*len(names_train) + 1) + "}{*}{" + problems[problem_i]["model_name"] + "}"
+        # max_means = [0] * len(names_test)  # Initialize a list to store the maximum mean value for each column
+
+        latex_table += " & & " + "\\multirow{1}{*}{Real}"
+
+
+
+        max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean[problem_i])
+        
+
+
+        max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+        min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+        second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+        second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+        avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+
+        
+        latex_table += avgs_stds_c + " \\\\\n"
+
+        latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+        latex_table += "\\noalign{\\vskip\\doublerulesep\\vskip-\\arrayrulewidth}"
+        latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+        
+        start_others = 0
+        for s, sampling_method in enumerate(sampling_methods):
+            latex_table += " & " + "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+            for i in range(len(names_train)):
+
+                index = s * len(names_train) + i + 1
+
+                train_name = names_train[i]
+                # if "makecell" in train_name:
+                #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+                # else:
+            
+                if i==0:
+                    latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+                else:
+                    latex_table += " & & " + "\\multirow{1}{*}{" + train_name + "}"
+
+                avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+
+                latex_table += avgs_stds_c + " \\\\\n"
+            latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+            
+        latex_table += "\\hline\n"
+    latex_table += "\\end{tabular}\n"
+    # latex_table += "}\n"
+    # latex_table += "\\label{tab:eval}\n"
+    latex_table += "\\end{table*}"
+    
+    return latex_table
+
+
 
 def generate_latex_table_max(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, sampling_method=""):
     if test_data:
@@ -218,6 +381,10 @@ def compute_fairness_metrics(y_test, y_pred, problem, group):
     return [m(y_test, y_pred, group) for m in problem["fairness_metrics"]]    
 
 def compute_feature_importance(model, model_name, feature_names):
+
+    feature_importance_dict = {name: 0.0 for name in feature_names}
+
+
     if model_name=="Catboost":
         fe = model.get_feature_importance(prettified=True).to_dict()
 
@@ -229,6 +396,7 @@ def compute_feature_importance(model, model_name, feature_names):
         fe = model.feature_importances_
         feature_importance_dict = {k: v for k, v in zip(feature_names, fe)}
     elif model_name=="LightGBM":
+        # fe = model[-1].feature_importances_
         fe = model.feature_importances_
         total_importance = np.sum(fe)
         feature_importances_percentage = (fe / total_importance)
@@ -243,15 +411,19 @@ def compute_feature_importance(model, model_name, feature_names):
 
         fe = mdi_importances.to_dict()
 
-        feature_importance_dict = {}
-
         for key, value in fe.items():
-            feature_name = key.split('__')[1].split("_")[0]  # Extract the feature name
-
-            if feature_name in feature_importance_dict:
-                feature_importance_dict[feature_name] += value  # Add the value if feature already exists
+            # match = re.search(r'(?<=__).*?(?=_\d*$)', key)
+            if "num" in key:
+                feature_name = key.split("__")[-1]
             else:
-                feature_importance_dict[feature_name] = value  # Create a new entry if feature doesn't exist
+                match = re.search(r'(?<=__).*?(?=_[^_]*$)', key)
+                feature_name = match.group(0)
+            # print(feature_names)
+            # print(feature_importance_dict)
+            # print(feature_name)
+            
+
+            feature_importance_dict[feature_name] += value  # Add the value if feature already exists
 
 
     ordered_list = [feature_importance_dict[key] for key in feature_names]
@@ -279,7 +451,7 @@ def is_fitted(estimator, X_test):
     
     return True
 
-def train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=False, visualize_tree=False, sampling_method="class_protected"):
+def train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=False, visualize_tree=False, sampling_method="class_protected"):
 
     if not keep_protected_input:
         X_train_copy = X_train.copy()
@@ -304,10 +476,9 @@ def train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=F
         return
 
     X_train[X_train.select_dtypes(['object']).columns] = X_train.select_dtypes(['object']).astype("category")
-
+    X_test[X_test.select_dtypes(['object']).columns] = X_test.select_dtypes(['object']).astype("category")
 
     fit_inputs = (X_train, y_train)
-
     if visualize_tree:
         if "cat_features" in problem["args"]: 
             fit_inputs = Pool(X_train, y_train, cat_features=problem["args"]["cat_features"], feature_names=list(X_train.columns))
@@ -343,12 +514,15 @@ def train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=F
     metrics_return = metrics + fairness_metrics
     return metrics_return, y_pred, feature_importance
 
-def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="cart", generative_seed=0, return_plot=False, sampling_method="class_protected"):
+def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart", generative_seed=0, return_plot=False, sampling_method="class_protected"):
+    print("\t\t Synthetic samples", generative_method)
+    
+    target = dataset_generator.target
     max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
     # Retrieve the DataFrame using the key
     max_length_df = split_dfs[max_length_df_key]
 
-    max_length_df_class_counts = max_length_df['income'].value_counts()
+    max_length_df_class_counts = max_length_df[target].value_counts()
 
     max_length_df_majority_class = max_length_df_class_counts.idxmax()
     max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
@@ -363,7 +537,7 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             augmented_dfs_plot = []
 
         for split_key, split_df in split_dfs.items():
-            class_counts = split_df['income'].value_counts()
+            class_counts = split_df[target].value_counts()
             augmented_dfs.append(split_df)
             if return_plot:
                 split_df_plot = split_df.copy()
@@ -376,17 +550,17 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
                 size = imbalance
 
                 if size > 0:
-                    class_split_df = split_df[split_df['income'] == class_label].copy()
-                    class_split_df.drop('income', axis=1, inplace=True)
+                    class_split_df = split_df[split_df[target] == class_label].copy()
+                    class_split_df.drop(target, axis=1, inplace=True)
                     class_split_df.drop('sex', axis=1, inplace=True)
-                    if generative_method=="tvae":
-                        split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+                    if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
-                        split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
-                    split_synthetic_data['income'] = class_label
+                    split_synthetic_data[target] = class_label
                     split_synthetic_data['sex'] = split_key
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
@@ -407,7 +581,7 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             augmented_dfs_plot = []
 
         for split_key, split_df in split_dfs.items():
-            class_counts = split_df['income'].value_counts()
+            class_counts = split_df[target].value_counts()
             augmented_dfs.append(split_df)
             if return_plot:
                 split_df_plot = split_df.copy()
@@ -421,12 +595,12 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             if size > 0:
                 class_split_df = split_df.copy()
                 class_split_df.drop('sex', axis=1, inplace=True)
-                if generative_method=="tvae":
-                    split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-                    split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+                if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                    split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
+                    split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                 else:
-                    split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-                    split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+                    split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+                    split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                     
                 split_synthetic_data['sex'] = split_key
                 augmented_dfs.append(split_synthetic_data.copy())
@@ -445,7 +619,7 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             augmented_dfs_plot = []
 
         for split_key, split_df in split_dfs.items():
-            class_counts = split_df['income'].value_counts()
+            class_counts = split_df[target].value_counts()
             augmented_dfs.append(split_df)
             if return_plot:
                 split_df_plot = split_df.copy()
@@ -461,17 +635,17 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
                 size = imbalance
 
                 if size > 0:
-                    class_split_df = split_df[split_df['income'] == class_label].copy()
-                    class_split_df.drop('income', axis=1, inplace=True)
+                    class_split_df = split_df[split_df[target] == class_label].copy()
+                    class_split_df.drop(target, axis=1, inplace=True)
                     class_split_df.drop('sex', axis=1, inplace=True)
-                    if generative_method=="tvae":
-                        split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+                    if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
-                        split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
-                    split_synthetic_data['income'] = class_label
+                    split_synthetic_data[target] = class_label
                     split_synthetic_data['sex'] = split_key
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
@@ -489,7 +663,7 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             augmented_dfs_plot = []
 
         for split_key, split_df in split_dfs.items():
-            class_counts = split_df['income'].value_counts()
+            class_counts = split_df[target].value_counts()
             augmented_dfs.append(split_df)
             if return_plot:
                 split_df_plot = split_df.copy()
@@ -508,17 +682,17 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
                     size = int(additional_class_1_instances)
 
                 if size > 0:
-                    class_split_df = split_df[split_df['income'] == class_label].copy()
-                    class_split_df.drop('income', axis=1, inplace=True)
+                    class_split_df = split_df[split_df[target] == class_label].copy()
+                    class_split_df.drop(target, axis=1, inplace=True)
                     class_split_df.drop('sex', axis=1, inplace=True)
-                    if generative_method=="tvae":
-                        split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+                    if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
-                        split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-                        split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+                        split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+                        split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
-                    split_synthetic_data['income'] = class_label
+                    split_synthetic_data[target] = class_label
                     split_synthetic_data['sex'] = split_key
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
@@ -530,8 +704,10 @@ def get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method="
             return augmented_dfs, augmented_dfs_plot
         return augmented_dfs
 
-def run_experiments(problems_classification, adult_dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, sampling_method="same_class", visualize_tree=False):
+def run_experiments(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, sampling_method="same_class", visualize_tree=False):
 
+
+    target = dataset_generator.target
     average_problems = []
     std_problems = []
     problems_all = []
@@ -542,22 +718,23 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
         print("Split", i, "/", num_repeats*num_folds)
         
         data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
-        data_train_encoded = adult_dataset_generator.encode(data_train, keep_dtypes=True)
-        data_test_encoded = adult_dataset_generator.encode(data_test)
+        data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
+        data_test_encoded = dataset_generator.encode(data_test)
 
 
 
-        X_train_real = data_train.copy().drop(columns=["income"])
+        X_train_real = data_train.copy().drop(columns=[target])
 
-        y_train_real = data_train_encoded["income"].copy().astype("int")
+        y_train_real = data_train_encoded[target].copy().astype("int")
+
 
         if split_test_set:
-            test_sets, _ = adult_dataset_generator.split_population(data_test)
+            test_sets, _ = dataset_generator.split_population(data_test)
         else:
             test_sets = {}
         test_sets["all"] = data_test
 
-        split_dfs, additional_sizes = adult_dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
+        split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
 
 
         # Get the DataFrame with the maximum length
@@ -565,7 +742,7 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
         # Retrieve the DataFrame using the key
         max_length_df = split_dfs[max_length_df_key]
 
-        max_length_df_class_counts = max_length_df['income'].value_counts()
+        max_length_df_class_counts = max_length_df[target].value_counts()
 
         max_length_df_majority_class = max_length_df_class_counts.idxmax()
         max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
@@ -580,10 +757,10 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
         for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
             generative_seed = hash((i, j)) % (2**32 - 1)
 
-            augmented_dfs =  get_synthetic_splits(adult_dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method)
+            augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method)
 
             # for split_key, split_df in split_dfs.items():
-            #     class_counts = split_df['income'].value_counts()
+            #     class_counts = split_df[target].value_counts()
             #     augmented_dfs.append(split_df)
 
             #     for class_label, class_count in class_counts.items():
@@ -592,27 +769,28 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
             #         size = imbalance
 
             #         if size > 0:
-            #             class_split_df = split_df[split_df['income'] == class_label].copy()
-            #             class_split_df.drop('income', axis=1, inplace=True)
+            #             class_split_df = split_df[split_df[target] == class_label].copy()
+            #             class_split_df.drop(target, axis=1, inplace=True)
             #             class_split_df.drop('sex', axis=1, inplace=True)
             #             if generative_method=="tvae":
-            #                 split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-            #                 split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+            #                 split_synthesizer = dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
+            #                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
             #             else:
-            #                 split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-            #                 split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+            #                 split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+            #                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                             
-            #             split_synthetic_data['income'] = class_label
+            #             split_synthetic_data[target] = class_label
             #             split_synthetic_data['sex'] = split_key
             #             augmented_dfs.append(split_synthetic_data.copy())
 
             augmented_trainingset = pd.concat(augmented_dfs)
-            augmented_trainingset_encoded = adult_dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
 
-            X_train_augmented = augmented_trainingset.drop(columns=["income"])
-            y_train_augmented = augmented_trainingset_encoded["income"].astype("int")
+            augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
 
-            # train_real = data_train_encoded["income"].astype("int")
+            X_train_augmented = augmented_trainingset.drop(columns=[target])
+            y_train_augmented = augmented_trainingset_encoded[target].astype("int")
+
+            # train_real = data_train_encoded[target].astype("int")
             train_sets_X.append(X_train_augmented)
             train_sets_y.append(y_train_augmented)
 
@@ -626,10 +804,11 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
                 preds = [] 
                 fe = [] 
                 for test_set_name, test_set in test_sets.items():
-                    test_set_encoded = adult_dataset_generator.encode(test_set)
-                    X_test = test_set.drop(columns=["income"])
-                    y_test = test_set_encoded["income"].astype("int")
-                    results, pred, feature_importance = train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method)
+                    test_set_encoded = dataset_generator.encode(test_set)
+                    X_test = test_set.drop(columns=[target])
+                    y_test = test_set_encoded[target].astype("int")
+
+                    results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method)
                     setup_metrics.append(results)
                     preds.append(pred)
                     fe.append(feature_importance)
@@ -654,8 +833,113 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
     return average_metrics_all, std_metrics_all, average_feature_importance_all, std_feature_importance_all
 
 
+def run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, visualize_tree=False):
+
+    target = dataset_generator.target
+    average_problems = []
+    std_problems = []
+    problems_all = []
+    problem_feat_imp_all = []
+    rkf = RepeatedKFold(n_splits=num_folds, n_repeats=num_repeats, random_state=42)
+    for i, (train_index, test_index) in enumerate(rkf.split(all_data)):    
+
+        print("Split", i, "/", num_repeats*num_folds)
+        
+        data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
+        data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
+        data_test_encoded = dataset_generator.encode(data_test)
+
+
+
+        X_train_real = data_train.copy().drop(columns=[target])
+
+        y_train_real = data_train_encoded[target].copy().astype("int")
+
+
+        if split_test_set:
+            test_sets, _ = dataset_generator.split_population(data_test)
+        else:
+            test_sets = {}
+        test_sets["all"] = data_test
+
+        split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
+
+
+        # Get the DataFrame with the maximum length
+        max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
+        # Retrieve the DataFrame using the key
+        max_length_df = split_dfs[max_length_df_key]
+
+        max_length_df_class_counts = max_length_df[target].value_counts()
+
+        max_length_df_majority_class = max_length_df_class_counts.idxmax()
+        max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
+
+        augmented_dfs = []
+        # split_df_keys, split_df_vals = zip(*split_dfs.items())
+
+
+        train_sets_X = [X_train_real]
+        train_sets_y = [y_train_real]
+
+        for t, sampling_method in enumerate(problems_classification[0]["sampling_methods"]):
+            for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
+                generative_seed = hash((i, j, t)) % (2**32 - 1)
+
+                augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method)
+
+                augmented_trainingset = pd.concat(augmented_dfs)
+
+                augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
+
+                X_train_augmented = augmented_trainingset.drop(columns=[target])
+                y_train_augmented = augmented_trainingset_encoded[target].astype("int")
+
+                # train_real = data_train_encoded[target].astype("int")
+                train_sets_X.append(X_train_augmented)
+                train_sets_y.append(y_train_augmented)
+
+        print("\t Evaluating")
+        metrics_all = []
+        feat_imp_all = []
+        for problem in problems_classification:
+            metrics_split = []
+            feat_imp_split = []
+            for X_train, y_train in zip(train_sets_X, train_sets_y):
+                setup_metrics = []
+                preds = [] 
+                fe = [] 
+                for test_set_name, test_set in test_sets.items():
+                    test_set_encoded = dataset_generator.encode(test_set)
+                    X_test = test_set.drop(columns=[target])
+                    y_test = test_set_encoded[target].astype("int")
+
+                    results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method)
+                    setup_metrics.append(results)
+                    preds.append(pred)
+                    fe.append(feature_importance)
+                metrics_split.append(setup_metrics)
+                feat_imp_split.append(fe)
+            metrics_all.append(metrics_split)
+            feat_imp_all.append(feat_imp_split)
+        problems_all.append(metrics_all)
+        problem_feat_imp_all.append(feat_imp_all)
+
+    problems_all = np.array(problems_all)
+
+    problem_feat_imp_all = np.array(problem_feat_imp_all)
+
+
+    average_metrics_all = np.mean(problems_all, axis=0)
+    std_metrics_all = np.std(problems_all, axis=0)
+
+    average_feature_importance_all = np.mean(problem_feat_imp_all, axis=0)
+    std_feature_importance_all = np.std(problem_feat_imp_all, axis=0)
+
+    return average_metrics_all, std_metrics_all, average_feature_importance_all, std_feature_importance_all
+
     
-# def run_experiments_old(problems_classification, adult_dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False):
+# def run_experiments_old(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False):
 
 #     average_problems = []
 #     std_problems = []
@@ -670,17 +954,17 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
 
 #             print(problem["model_name"], i)
 #             data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
-#             data_train_encoded = adult_dataset_generator.encode(data_train, keep_dtypes=True)
-#             data_test_encoded = adult_dataset_generator.encode(data_test)
+#             data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
+#             data_test_encoded = dataset_generator.encode(data_test)
 
 
-#             X_train_real = data_train.copy().drop(columns=["income"])
-#             y_train_real = data_train_encoded["income"].copy().astype("int")
+#             X_train_real = data_train.copy().drop(columns=[target])
+#             y_train_real = data_train_encoded[target].copy().astype("int")
 
-#             test_sets, _ = adult_dataset_generator.split_population(data_test)
+#             test_sets, _ = dataset_generator.split_population(data_test)
 #             test_sets["all"] = data_test
 
-#             split_dfs, additional_sizes = adult_dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
+#             split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
 
 
 #             # Get the DataFrame with the maximum length
@@ -688,7 +972,7 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
 #             # Retrieve the DataFrame using the key
 #             max_length_df = split_dfs[max_length_df_key]
 
-#             max_length_df_class_counts = max_length_df['income'].value_counts()
+#             max_length_df_class_counts = max_length_df[target].value_counts()
 
 #             max_length_df_majority_class = max_length_df_class_counts.idxmax()
 #             max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
@@ -705,7 +989,7 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
 #                 print("\t", generative_method, "seed", generative_seed)
 
 #                 for split_key, split_df in split_dfs.items():
-#                     class_counts = split_df['income'].value_counts()
+#                     class_counts = split_df[target].value_counts()
 #                     augmented_dfs.append(split_df)
 
 #                     for class_label, class_count in class_counts.items():
@@ -714,27 +998,27 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
 #                         size = imbalance
 
 #                         if size > 0:
-#                             class_split_df = split_df[split_df['income'] == class_label].copy()
-#                             class_split_df.drop('income', axis=1, inplace=True)
+#                             class_split_df = split_df[split_df[target] == class_label].copy()
+#                             class_split_df.drop(target, axis=1, inplace=True)
 #                             class_split_df.drop('sex', axis=1, inplace=True)
 #                             if generative_method=="tvae":
-#                                 split_synthesizer = adult_dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-#                                 split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
+#                                 split_synthesizer = dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
+#                                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
 #                             else:
-#                                 split_synthesizer = adult_dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-#                                 split_synthetic_data = adult_dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
+#                                 split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
+#                                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                                 
-#                             split_synthetic_data['income'] = class_label
+#                             split_synthetic_data[target] = class_label
 #                             split_synthetic_data['sex'] = split_key
 #                             augmented_dfs.append(split_synthetic_data.copy())
 
 #                 augmented_trainingset = pd.concat(augmented_dfs)
-#                 augmented_trainingset_encoded = adult_dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
+#                 augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
 
-#                 X_train_augmented = augmented_trainingset.drop(columns=["income"])
-#                 y_train_augmented = augmented_trainingset_encoded["income"].astype("int")
+#                 X_train_augmented = augmented_trainingset.drop(columns=[target])
+#                 y_train_augmented = augmented_trainingset_encoded[target].astype("int")
 
-#                 # train_real = data_train_encoded["income"].astype("int")
+#                 # train_real = data_train_encoded[target].astype("int")
 #                 train_sets_X.append(X_train_augmented)
 #                 train_sets_y.append(y_train_augmented)
 
@@ -744,9 +1028,9 @@ def run_experiments(problems_classification, adult_dataset_generator, all_data, 
 #                 setup_metrics = []
 #                 preds = [] 
 #                 for test_set_name, test_set in test_sets.items():
-#                     test_set_encoded = adult_dataset_generator.encode(test_set)
-#                     X_test = test_set.drop(columns=["income"])
-#                     y_test = test_set_encoded["income"].astype("int")
+#                     test_set_encoded = dataset_generator.encode(test_set)
+#                     X_test = test_set.drop(columns=[target])
+#                     y_test = test_set_encoded[target].astype("int")
 #                     results, pred = train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input)
 #                     setup_metrics.append(results)
 #                     preds.append(pred)
