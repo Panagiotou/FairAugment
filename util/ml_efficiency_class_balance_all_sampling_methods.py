@@ -26,17 +26,15 @@ warnings.filterwarnings("ignore", category=UserWarning, message="categorical_fea
 
 RUN_GPU = False
 
-from fairlearn.metrics import demographic_parity_difference, demographic_parity_ratio, true_positive_rate_difference, true_positive_rate, false_positive_rate_difference
 
-def eq_odd(y_test, y_pred, group_test):
-    return true_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)\
-                + false_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)
+
+
 import warnings
 
 # Ignore FutureWarnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, balanced_accuracy_score
 import xgboost as xgb
 
 from catboost import CatBoostClassifier
@@ -82,10 +80,10 @@ def run(dataset, protected_attribute):
         print("Only categorical features, dropping SMOTE")
         generative_methods.remove("smote")
 
-    problem_classification = {"metrics":[accuracy_score, f1_score, roc_auc_score],
-                        "metric_names":["Accuracy", "F1", "ROC AUC"],
-                        "fairness_metrics": [eq_odd],
-                        "fairness_metric_names": ["Equalized odds"],
+    problem_classification = {"metrics":[balanced_accuracy_score, f1_score, roc_auc_score],
+                        "metric_names":["BAcc", "F1", "ROC AUC"],
+                        "fairness_metrics": [eq_odd, stat_par, eq_opp],
+                        "fairness_metric_names": ["Equalized odds", "Statistical Parity", "Equal Opportunity"],
                         "generative_methods":generative_methods,
                         "sampling_methods":['class', 'class_protected', 'protected', 'same_class']}
                         
@@ -148,7 +146,7 @@ def run(dataset, protected_attribute):
     average, std, feat_imp_average, feat_imp_std = run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = 5, num_folds = 3, protected_attributes = [protected_attribute])
 
     print(average.shape)
-    np.savez('../results/{}/arrays/arrays_all_models.npz'.format(dataset), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
+    np.savez('../results/{}/arrays/arrays_all_models_all_fairness_metrics_bacc.npz'.format(dataset), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
 
 if __name__ == '__main__':
     run()

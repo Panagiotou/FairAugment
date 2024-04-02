@@ -11,6 +11,20 @@ from sklearn import tree
 import graphviz
 import regex as re
 
+
+from fairlearn.metrics import demographic_parity_difference, demographic_parity_ratio, true_positive_rate_difference, true_positive_rate, false_positive_rate_difference
+
+def eq_odd(y_test, y_pred, group_test):
+    return true_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)\
+                + false_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)
+
+def stat_par(y_test, y_pred, group_test):
+    return demographic_parity_difference(y_test, y_pred, sensitive_features=group_test)
+
+def eq_opp(y_test, y_pred, group_test):
+    return true_positive_rate_difference(y_test, y_pred, sensitive_features=group_test)
+
+
 class PositiveOrdinalEncoder:
     def __init__(self, categorical_cols):
         self.mapping = {}
@@ -40,7 +54,7 @@ class PositiveOrdinalEncoder:
 
 
 
-def get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny"):
+def get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny", real_avgs=[], color_best_matrix=[]):
     avgs_stds_c = ""
     for j in range(len(names_test)):
         test_name = names_test[j]
@@ -49,17 +63,63 @@ def get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_t
         avg_metric = ["{:.3f}".format(x) for x in avg_metric]
         std_metric = ["{:.3f}".format(x) for x in std_metric]
 
+
+        add_pre = ""
+
         for idx in range(len(avg_metric)):
+            if idx in color_best_matrix and np.round(float(avg_metric[idx]), 3) < np.round(float(real_avgs[idx]),3) and metrics_optimal[idx]=="min":
+                add_pre = "\\cellcolor{blue!15}"
+            if idx in color_best_matrix and np.round(float(avg_metric[idx]), 3) > np.round(float(real_avgs[idx]),3) and metrics_optimal[idx]=="max":
+                add_pre = "\\cellcolor{blue!15}"
+
             if avg_metric[idx] == max_of_each_column[idx] and metrics_optimal[idx]=="max":
-                avg_metric[idx] = '\\textbf{' + avg_metric[idx] + '}'
+                avg_metric[idx] = add_pre + '\\textbf{' + avg_metric[idx] + '}'
             if avg_metric[idx] == min_of_each_column[idx] and metrics_optimal[idx]=="min":
-                avg_metric[idx] = '\\textbf{' + avg_metric[idx] + '}'
+                avg_metric[idx] = add_pre + '\\textbf{' + avg_metric[idx] + '}'
 
             if avg_metric[idx] == second_max_of_each_column[idx] and metrics_optimal[idx]=="max":
-                        avg_metric[idx] = '\\underline{' + avg_metric[idx] + '}'
+                        avg_metric[idx] = add_pre + '\\underline{' + avg_metric[idx] + '}'
 
             if avg_metric[idx] == second_min_of_each_column[idx] and metrics_optimal[idx]=="min":
-                avg_metric[idx] = '\\underline{' + avg_metric[idx] + '}'
+                avg_metric[idx] = add_pre + '\\underline{' + avg_metric[idx] + '}'
+
+
+        avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
+    return avgs_stds_c
+
+def get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny", real_avgs=[], color_best_matrix=[]):
+    avgs_stds_c = ""
+
+    for j in range(len(names_test)):
+        test_name = names_test[j]
+        avg_metric = all_metrics_mean[index][j]
+        std_metric = all_metrics_std[index][j]
+        avg_metric = ["{:.3f}".format(x) for x in avg_metric]
+        std_metric = ["{:.3f}".format(x) for x in std_metric]
+
+
+        for idx in range(len(avg_metric)):
+            add_pre = ""
+            if idx in color_best_matrix:
+                if metrics_optimal[idx]=="min":
+                    if float(avg_metric[idx]) < real_avgs[idx]: 
+                        add_pre = "\\cellcolor{blue!15}"
+                else:
+                    if float(avg_metric[idx]) > real_avgs[idx]:
+                        add_pre = "\\cellcolor{blue!15}"
+
+            if avg_metric[idx] == max_of_each_column[idx] and metrics_optimal[idx]=="max":
+                avg_metric[idx] = add_pre + '\\textbf{' + avg_metric[idx] + '}'
+            elif avg_metric[idx] == min_of_each_column[idx] and metrics_optimal[idx]=="min":
+                avg_metric[idx] = add_pre + '\\textbf{' + avg_metric[idx] + '}'
+            elif avg_metric[idx] == second_max_of_each_column[idx] and metrics_optimal[idx]=="max":
+                        avg_metric[idx] = add_pre + '\\underline{' + avg_metric[idx] + '}'
+            elif avg_metric[idx] == second_min_of_each_column[idx] and metrics_optimal[idx]=="min":
+                avg_metric[idx] = add_pre + '\\underline{' + avg_metric[idx] + '}'
+            else:
+                avg_metric[idx] = add_pre + avg_metric[idx]
+
+
 
         avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
     return avgs_stds_c
@@ -77,27 +137,147 @@ def get_max_min(all_m):
     data_min[data_min == min_of_each_column] = +np.inf
 
     second_max_of_each_column = np.max(data_max, axis=0)[0]
-    second_min_of_each_column = np.min(data_max, axis=0)[0]
+    second_min_of_each_column = np.min(data_min, axis=0)[0]
 
     second_max_of_each_column[np.isneginf(second_max_of_each_column)] = max_of_each_column[np.isneginf(second_max_of_each_column)]
     second_min_of_each_column[np.isinf(second_min_of_each_column)] = min_of_each_column[np.isinf(second_min_of_each_column)]
 
     return max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column
 
-def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name=""):
+def generate_latex_table_max_all_methods_avg_problems(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[]):
     
     sampling_methods = problems[0]["sampling_methods"]
     if test_data:
         all_cols =  str(len(metric_names_actual) * len(names_test))
     else:
         all_cols = str(len(problems[0]["metric_names"]) + 2)
-    latex_table = "\\begin{table*}[h]\n"
-    latex_table += "\\caption{{{}}}\n".format(dataset_name)
-    latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
 
-    latex_table += "\\centering\n"
-    # latex_table += "\\scalebox{0.70}{\n"
-    latex_table += "\\begin{tabular}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    if longtable:
+        latex_table = "\\begin{center}\n"
+        latex_table += "\\begin{longtable}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+        latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+    else:
+
+        latex_table = "\\begin{table*}[h]\n"
+        latex_table += "\\caption{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+        latex_table += "\\centering\n"
+        # latex_table += "\\scalebox{0.70}{\n"
+        latex_table += "\\begin{tabular}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    latex_table += "\\hline\n"
+
+    latex_table += "\\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
+    # latex_table += "& "
+    # for name_t in names_test:
+    #     latex_table +=" & \multicolumn{" + str(len(metric_names_actual)) + "}{c}{" + name_t + "}"
+    # latex_table += "\\\\\n"
+    latex_table += "\cline{3-" + str(2+len(metric_names_actual)) +"}"
+    # latex_table +=  "& & " + " & ".join(metric_names_actual) + " & " + " & ".join(metric_names_actual) + " \\\\\n"
+    latex_table +=  "& " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(names_test))]) + " \\\\\n"
+
+
+    if longtable:
+ 
+        latex_table += "\\endfirsthead\n"
+        latex_table += "\\endhead\n"
+
+        latex_table += "\\hline \\multicolumn{7}{c}{{Continued on next page}} \\\ \\hline\n"
+        latex_table += "\\endfoot\n"
+
+        latex_table += "\\hline \\hline\n"
+        latex_table += "\\endlastfoot\n"
+
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
+
+    # print(problems[problem_i]["model_name"])
+    # latex_table += "\\multirow{" + str(len(sampling_methods)*len(names_train) + 1) + "}{*}{" + problems[0]["model_name"] + "}"
+    # max_means = [0] * len(names_test)  # Initialize a list to store the maximum mean value for each column
+
+    latex_table += " & " + "\\multirow{1}{*}{Real}"
+
+
+
+    max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean)
+    
+
+
+    max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+    min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+    second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+    second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+    real_avgs = np.round(all_metrics_mean[0][0],3)
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs)
+
+
+    
+    latex_table += avgs_stds_c + " \\\\\n"
+
+    latex_table += "\\hline\n"
+    latex_table += "\\hline\n"
+
+    
+    start_others = 0
+    for s, sampling_method in enumerate(sampling_methods):
+        latex_table += "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+        for i in range(len(names_train)):
+
+            index = s * len(names_train) + i + 1
+
+            train_name = names_train[i]
+            # if "makecell" in train_name:
+            #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+            # else:
+        
+            if i==0:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+            else:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+
+            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix)
+
+            latex_table += avgs_stds_c + " \\\\\n"
+        latex_table += "\\hline\n"
+
+        
+    if longtable:
+        latex_table += "\\end{longtable}\n"
+        latex_table += "\\end{center}\n"
+    else:
+        latex_table += "\\end{tabular}\n"
+        # latex_table += "}\n"
+        # latex_table += "\\label{tab:eval}\n"
+        latex_table += "\\end{table*}"
+    
+    return latex_table
+
+
+def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[]):
+    
+    sampling_methods = problems[0]["sampling_methods"]
+    if test_data:
+        all_cols =  str(len(metric_names_actual) * len(names_test))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
+
+    if longtable:
+        latex_table = "\\begin{center}\n"
+        latex_table += "\\begin{longtable}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+        latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+    else:
+
+        latex_table = "\\begin{table*}[h]\n"
+        latex_table += "\\caption{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+        latex_table += "\\centering\n"
+        # latex_table += "\\scalebox{0.70}{\n"
+        latex_table += "\\begin{tabular}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
     latex_table += "\\hline\n"
 
     latex_table += "\\clf & \\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
@@ -109,6 +289,17 @@ def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, name
     # latex_table +=  "& & " + " & ".join(metric_names_actual) + " & " + " & ".join(metric_names_actual) + " \\\\\n"
     latex_table +=  "& & " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(names_test))]) + " \\\\\n"
 
+
+    if longtable:
+ 
+        latex_table += "\\endfirsthead\n"
+        latex_table += "\\endhead\n"
+
+        latex_table += "\\hline \\multicolumn{7}{c}{{Continued on next page}} \\\ \\hline\n"
+        latex_table += "\\endfoot\n"
+
+        latex_table += "\\hline \\hline\n"
+        latex_table += "\\endlastfoot\n"
 
     latex_table += "\\hline"
     count_make_cell = sum("makecell" in item for item in names_train)
@@ -131,7 +322,10 @@ def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, name
         second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
         second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
 
-        avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+        real_avgs = all_metrics_mean[problem_i][0][0]
+
+        avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs)
+
 
         
         latex_table += avgs_stds_c + " \\\\\n"
@@ -158,19 +352,255 @@ def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, name
                 else:
                     latex_table += " & & " + "\\multirow{1}{*}{" + train_name + "}"
 
-                avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+                avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix)
 
                 latex_table += avgs_stds_c + " \\\\\n"
             latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
             
         latex_table += "\\hline\n"
-    latex_table += "\\end{tabular}\n"
-    # latex_table += "}\n"
-    # latex_table += "\\label{tab:eval}\n"
-    latex_table += "\\end{table*}"
+
+    if longtable:
+        latex_table += "\\end{longtable}\n"
+        latex_table += "\\end{center}\n"
+    else:
+        latex_table += "\\end{tabular}\n"
+        # latex_table += "}\n"
+        # latex_table += "\\label{tab:eval}\n"
+        latex_table += "\\end{table*}"
     
     return latex_table
 
+
+# def generate_latex_table_max_all_methods(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False):
+    
+#     sampling_methods = problems[0]["sampling_methods"]
+#     if test_data:
+#         all_cols =  str(len(metric_names_actual) * len(names_test))
+#     else:
+#         all_cols = str(len(problems[0]["metric_names"]) + 2)
+
+#     if longtable:
+#         latex_table = "\\begin{center}\n"
+#         latex_table += "\\begin{longtable}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+#         latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+#         latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+#     else:
+
+#         latex_table = "\\begin{table*}[h]\n"
+#         latex_table += "\\caption{{{}}}\n".format(dataset_name)
+#         latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+#         latex_table += "\\centering\n"
+#         # latex_table += "\\scalebox{0.70}{\n"
+#         latex_table += "\\begin{tabular}{l l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+#     latex_table += "\\hline\n"
+
+#     latex_table += "\\clf & \\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
+#     # latex_table += "& "
+#     # for name_t in names_test:
+#     #     latex_table +=" & \multicolumn{" + str(len(metric_names_actual)) + "}{c}{" + name_t + "}"
+#     # latex_table += "\\\\\n"
+#     latex_table += "\cline{4-" + str(3+len(metric_names_actual)) +"}"
+#     # latex_table +=  "& & " + " & ".join(metric_names_actual) + " & " + " & ".join(metric_names_actual) + " \\\\\n"
+#     latex_table +=  "& & " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(names_test))]) + " \\\\\n"
+
+
+#     if longtable:
+ 
+#         latex_table += "\\endfirsthead\n"
+#         latex_table += "\\endhead\n"
+
+#         latex_table += "\\hline \\multicolumn{7}{c}{{Continued on next page}} \\\ \\hline\n"
+#         latex_table += "\\endfoot\n"
+
+#         latex_table += "\\hline \\hline\n"
+#         latex_table += "\\endlastfoot\n"
+
+#     latex_table += "\\hline"
+#     count_make_cell = sum("makecell" in item for item in names_train)
+
+#     for problem_i in range(len(problems)):
+#         # print(problems[problem_i]["model_name"])
+#         latex_table += "\\multirow{" + str(len(sampling_methods)*len(names_train) + 1) + "}{*}{" + problems[problem_i]["model_name"] + "}"
+#         # max_means = [0] * len(names_test)  # Initialize a list to store the maximum mean value for each column
+
+#         latex_table += " & & " + "\\multirow{1}{*}{Real}"
+
+
+
+#         max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean[problem_i])
+        
+
+
+#         max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+#         min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+#         second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+#         second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+#         avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+
+        
+#         latex_table += avgs_stds_c + " \\\\\n"
+
+#         latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+#         latex_table += "\\noalign{\\vskip\\doublerulesep\\vskip-\\arrayrulewidth}"
+#         latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+        
+#         start_others = 0
+#         for s, sampling_method in enumerate(sampling_methods):
+#             latex_table += " & " + "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+#             for i in range(len(names_train)):
+
+#                 index = s * len(names_train) + i + 1
+
+#                 train_name = names_train[i]
+#                 # if "makecell" in train_name:
+#                 #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+#                 # else:
+            
+#                 if i==0:
+#                     latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+#                 else:
+#                     latex_table += " & & " + "\\multirow{1}{*}{" + train_name + "}"
+
+#                 avgs_stds_c = get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal)
+
+#                 latex_table += avgs_stds_c + " \\\\\n"
+#             latex_table += "\\cline{3-" + str(3+len(metric_names_actual)) + "}"
+            
+#         latex_table += "\\hline\n"
+
+#     if longtable:
+#         latex_table += "\\end{longtable}\n"
+#         latex_table += "\\end{center}\n"
+#     else:
+#         latex_table += "\\end{tabular}\n"
+#         # latex_table += "}\n"
+#         # latex_table += "\\label{tab:eval}\n"
+#         latex_table += "\\end{table*}"
+    
+#     return latex_table
+
+
+
+def generate_latex_table_max(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, sampling_method=""):
+    if test_data:
+        all_cols =  str(2 + len(metric_names_actual) * len(names_test))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
+    latex_table = "\\begin{table}[h]\n"
+    latex_table += "\\centering\n"
+    # latex_table += "\\scalebox{0.70}{\n"
+    latex_table += "\\begin{tabular}{l l " + " ".join(["c"]*(int(all_cols)-2)) + "}\n"
+    latex_table += "\\hline\n"
+    if test_data:
+        if len(metric_names_actual) > 0:
+            latex_table += "Model & Train data & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{Test data} \\\\\n" 
+            latex_table += "& "
+            for name_t in names_test:
+                latex_table +=" & \multicolumn{" + str(len(metric_names_actual)) + "}{c}{" + name_t + "}"
+            latex_table += "\\\\\n"
+            latex_table += "\cline{3-" + str(all_cols) +"}"
+            # latex_table +=  "& & " + " & ".join(metric_names_actual) + " & " + " & ".join(metric_names_actual) + " \\\\\n"
+            latex_table +=  "& " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(names_test))]) + " \\\\\n"
+        else:
+            latex_table += "Model & Train data & Test data & " + " & ".join(problems[0]["metric_names"]) + " \\\\\n"
+    else:
+        if len(metric_names_actual) > 0:
+            latex_table += "Model & Train data & " + " & ".join(metric_names_actual) + " \\\\\n"
+        else:
+            latex_table += "Model & Train data & " + " & ".join(problems[0]["metric_names"]) + " \\\\\n"
+
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
+
+    for problem_i in range(len(problems)):
+        # print(problems[problem_i]["model_name"])
+        latex_table += "\\multirow{" + str(1*len(problems)) + "}{*}{" + problems[problem_i]["model_name"] + "}"
+        # max_means = [0] * len(names_test)  # Initialize a list to store the maximum mean value for each column
+        
+        # # Iterate over each test name to find the maximum mean value for each column
+        # for j in range(len(names_test)):
+        #     max_mean = 0
+        #     for i in range(len(names_train)):
+        #         avg_metric = all_metrics_mean[problem_i][i][j]
+        #         # Check if the current value is greater than the current max_mean
+        #         if avg_metric.max() > max_mean:
+        #             max_mean = avg_metric.max()
+        #     max_means[j] = "{:.3f}".format(max_mean)
+
+        max_of_each_column = np.max(all_metrics_mean[problem_i], axis=0)[0]
+        min_of_each_column = np.min(all_metrics_mean[problem_i], axis=0)[0]
+
+        sorted_arr = np.sort(all_metrics_mean[problem_i], axis=0)
+
+        sorted_arr_inv = sorted_arr[::-1]
+
+        # Select the second element in each column
+        second_max_of_each_column= sorted_arr_inv[1][0]
+        second_min_of_each_column= sorted_arr[1][0]
+
+
+        max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+        second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+        second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+        min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+
+        for i in range(len(names_train)):
+            train_name = names_train[i]
+            # if "makecell" in train_name:
+            #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+            # else:
+            latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+            # avg_metric = all_metrics_mean[metric_row][name_row][metric_col]
+            # std_metric = all_metrics_std[metric_row][name_row][metric_col]
+            # latex_table += f"& {avg_metric:.3f} ({std_metric:.3f})"
+            avgs_stds_c = ""
+            # avgs_c = ""
+            # stds_c = ""
+            for j in range(len(names_test)):
+                test_name = names_test[j]
+                avg_metric = all_metrics_mean[problem_i][i][j]
+                std_metric = all_metrics_std[problem_i][i][j]
+                # std_metric = all_metrics_std[metric_row][name_row][metric_col]
+                # avgs_c += " & " + " & ".join(map(lambda x: "{:.3f}".format(x), avg_metric))
+                # stds_c += " & " + " & ".join(map(lambda x: "({:.3f})".format(x), std_metric))
+                avg_metric = ["{:.3f}".format(x) for x in avg_metric]
+                std_metric = ["{:.3f}".format(x) for x in std_metric]
+
+                for i in range(len(avg_metric)):
+                    if avg_metric[i] == max_of_each_column[i] and metrics_optimal[i]=="max":
+                        avg_metric[i] = '\\textbf{' + avg_metric[i] + '}'
+                    if avg_metric[i] == min_of_each_column[i] and metrics_optimal[i]=="min":
+                        avg_metric[i] = '\\textbf{' + avg_metric[i] + '}'
+
+                    if avg_metric[i] == second_max_of_each_column[i] and metrics_optimal[i]=="max":
+                                avg_metric[i] = '\\underline{' + avg_metric[i] + '}'
+
+                    if avg_metric[i] == second_min_of_each_column[i] and metrics_optimal[i]=="min":
+                        avg_metric[i] = '\\underline{' + avg_metric[i] + '}'
+
+                # avgs_stds_c += " & " + " & ".join(map(lambda x, y: "{:.3f} \scriptsize{$\pm$ {:.3f}}".format(x, y), avg_metric, std_metric))
+                avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \scriptsize{{$\pm$ {}}}".format(x[0], x[1]), zip(avg_metric, std_metric)))
+
+                # if test_data:
+                #     latex_table += " & " + test_name + " & " +  numbers + " \\\\\n"
+                # else:
+            latex_table += avgs_stds_c + " \\\\\n"
+            # latex_table += avgs_c + " \\\\\n"
+            # latex_table += " & " + stds_c + " \\\\\n"
+
+                # latex_table += "\\cline{2-" + all_cols + "}\n"
+        latex_table += "\\hline\n"
+    latex_table += "\\end{tabular}\n"
+    # latex_table += "}\n"
+    latex_table += "\\caption{{Comparison, sampling method = {}}}\n".format(sampling_method)
+    # latex_table += "\\label{tab:eval}\n"
+    latex_table += "\\end{table}"
+    
+    return latex_table
 
 
 def generate_latex_table_max(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, sampling_method=""):

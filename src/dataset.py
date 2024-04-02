@@ -52,7 +52,7 @@ class Dataset():
     def load_dataset(self, dataset_name):
 
         if dataset_name == "adult":
-            self.ignore_features += ["fnlwgt", "educational-num"]
+            self.ignore_features = ["fnlwgt", "educational-num"]
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/adult-clean.csv"
 
             target = "Class-label"
@@ -88,6 +88,9 @@ class Dataset():
 
                 if df.isnull().values.any() or df.empty:
                     print("Nan in synthetic")
+                    print(df[df.isna().any(axis=1)])
+                    print(dataset_name)
+    
                     exit(1)
                 # Save the data to the specified file path as JSON
                 df.to_json(json_file_path, orient='records', lines=True)
@@ -130,7 +133,7 @@ class Dataset():
 
 
         elif dataset_name == "compas":
-            self.ignore_features += ["id", "age_cat", "priors_count.1", "violent_recid"]
+            self.ignore_features = ["id", "age_cat", "priors_count.1", "violent_recid"]
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/compas-scores-two-years_clean.csv"
             target = "two_year_recid"
 
@@ -166,6 +169,9 @@ class Dataset():
 
                 if df.isnull().values.any() or df.empty:
                     print("Nan in synthetic")
+                    print(df[df.isna().any(axis=1)])
+                    print(dataset_name)
+    
                     exit(1)
                 # Save the data to the specified file path as JSON
                 df.to_json(json_file_path, orient='records', lines=True)
@@ -244,6 +250,7 @@ class Dataset():
 
 
         elif dataset_name == "dutch":
+            self.ignore_features = []
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/dutch.csv"
             target = "occupation"
 
@@ -279,6 +286,9 @@ class Dataset():
 
                 if df.isnull().values.any() or df.empty:
                     print("Nan in synthetic")
+                    print(df[df.isna().any(axis=1)])
+                    print(dataset_name)
+    
                     exit(1)
 
                 # df["dummy"] = 0.0
@@ -319,6 +329,8 @@ class Dataset():
 
 
         elif dataset_name == "german":
+            self.ignore_features = []
+
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/german_data_credit.csv"
 
             target = "class-label"
@@ -355,6 +367,9 @@ class Dataset():
 
                 if df.isnull().values.any() or df.empty:
                     print("Nan in synthetic")
+                    print(df[df.isna().any(axis=1)])
+                    print(dataset_name)
+    
                     exit(1)
                 # Save the data to the specified file path as JSON
                 df.to_json(json_file_path, orient='records', lines=True)
@@ -487,6 +502,9 @@ class Dataset():
 
                 if df.isnull().values.any() or df.empty:
                     print("Nan in synthetic")
+                    print(df[df.isna().any(axis=1)])
+                    print(dataset_name)
+    
                     exit(1)
 
                 categorical_transformer_lgbm = Pipeline(steps=[
@@ -602,9 +620,18 @@ class Dataset():
         
         #sanity check
         if synthetic_data.isnull().values.any():
+
+            imputer = SimpleImputer(strategy='most_frequent')
+
             print("Nan in synthetic")
-            exit(1)
-            return
+            print(synthetic_data[synthetic_data.isna().any(axis=1)])
+            print(name)
+            print("Imputing")
+
+            df = pd.DataFrame(imputer.fit_transform(synthetic_data), columns=synthetic_data.columns)
+            df = df.astype(synthetic_data.dtypes)
+
+            return df
 
         return synthetic_data
 
