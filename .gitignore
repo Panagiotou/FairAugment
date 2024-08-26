@@ -10,3 +10,5 @@ screen_log*
 Fair_Max_Entropy_Distributions
 
 src/Models
+
+temp/

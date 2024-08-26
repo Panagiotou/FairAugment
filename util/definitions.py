@@ -87,7 +87,7 @@ def get_metric_row(all_metrics_mean, all_metrics_std, problem_i, index,  names_t
         avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
     return avgs_stds_c
 
-def get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny", real_avgs=[], color_best_matrix=[]):
+def get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, size="tiny", real_avgs=[], color_best_matrix=[], include_std=True):
     avgs_stds_c = ""
 
     for j in range(len(names_test)):
@@ -120,8 +120,11 @@ def get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, ma
                 avg_metric[idx] = add_pre + avg_metric[idx]
 
 
+        if include_std:
+            avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
+        else:
+            avgs_stds_c += " & " + " & ".join(map(str, avg_metric))
 
-        avgs_stds_c += " & " + " & ".join(map(lambda x: "{} \{}{{$\pm$ {}}}".format(x[0], size, x[1]), zip(avg_metric, std_metric)))
     return avgs_stds_c
 
 def get_max_min(all_m):
@@ -144,7 +147,107 @@ def get_max_min(all_m):
 
     return max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column
 
-def generate_latex_table_max_all_methods_avg_problems(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[]):
+def generate_latex_table_max_all_methods_intersectional(metrics_mean, metrics_std, names_train, names_test, problems, protected_attributes_all, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[], include_std=True):
+    
+
+
+    len_prot = len(protected_attributes_all)
+    len_metr = len(metric_names_actual)
+    metrics_optimal = [element for element in metrics_optimal for _ in range(3)]
+
+    sampling_methods = problems[0]["sampling_methods"]
+    if test_data:
+        all_cols =  str(len(metric_names_actual) * len(names_test) * len(protected_attributes_all))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
+
+    if longtable:
+        latex_table = "\\begin{center}\n"
+        latex_table += "\\begin{longtable}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+        latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+    else:
+
+        latex_table = "\\begin{table*}[h]\n"
+        latex_table += "\\caption{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+        latex_table += "\\centering\n"
+        # latex_table += "\\scalebox{0.70}{\n"
+        latex_table += "\\begin{tabular}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    latex_table += "\\hline\n"
+
+    latex_table += "\\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual) * len(protected_attributes_all)) + "}{c}{\\metrics} \\\\\n" 
+
+    # latex_table += "\cline{3-" + str(2+len(metric_names_actual)) +"}"
+
+
+    latex_table +=  "& " + "".join([" & " + " & ".join([f"\\multicolumn{{{len_metr}}}{{c}}{{{prot}}}" for prot in protected_attributes_all]) for _ in range(len(names_test))]) + " \\\\\n"
+
+    latex_table +=  "& " + "".join([" & " + " & ".join(metric_names_actual) for _ in range(len(protected_attributes_all))]) + " \\\\\n"
+
+
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
+
+    latex_table += " & " + "\\multirow{1}{*}{Real}"
+
+    mm_sh = metrics_mean.shape
+    all_metrics_mean = np.reshape(metrics_mean, (*mm_sh[2:-1], mm_sh[0]*mm_sh[-1]))
+    all_metrics_std = np.reshape(metrics_std, (*mm_sh[2:-1], mm_sh[0]*mm_sh[-1]))
+
+    max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean)
+    
+
+    max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+    min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+    second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+    second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+    real_avgs = np.round(all_metrics_mean[0][0],3)
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, include_std=include_std)
+
+
+    
+    latex_table += avgs_stds_c + " \\\\\n"
+
+    latex_table += "\\hline\n"
+    latex_table += "\\hline\n"
+
+    
+    start_others = 0
+    for s, sampling_method in enumerate(sampling_methods):
+        latex_table += "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+        for i in range(len(names_train)):
+
+            index = s * len(names_train) + i + 1
+
+            train_name = names_train[i]
+            # if "makecell" in train_name:
+            #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+            # else:
+        
+            if i==0:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+            else:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+
+            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix, include_std=include_std)
+
+            latex_table += avgs_stds_c + " \\\\\n"
+        latex_table += "\\hline\n"
+
+        
+
+    latex_table += "\\end{tabular}\n"
+    latex_table += "\\end{table*}"
+    
+    return latex_table
+
+
+
+def generate_latex_table_max_all_methods_avg_problems(all_metrics_mean, all_metrics_std, names_train, names_test, problems, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[], include_std=True):
     
     sampling_methods = problems[0]["sampling_methods"]
     if test_data:
@@ -210,7 +313,7 @@ def generate_latex_table_max_all_methods_avg_problems(all_metrics_mean, all_metr
     second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
 
     real_avgs = np.round(all_metrics_mean[0][0],3)
-    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs)
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, include_std=include_std)
 
 
     
@@ -238,7 +341,7 @@ def generate_latex_table_max_all_methods_avg_problems(all_metrics_mean, all_metr
             else:
                 latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
 
-            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix)
+            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix, include_std=include_std)
 
             latex_table += avgs_stds_c + " \\\\\n"
         latex_table += "\\hline\n"
@@ -881,18 +984,21 @@ def is_fitted(estimator, X_test):
     
     return True
 
-def train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=False, visualize_tree=False, sampling_method="class_protected"):
+def train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=False, visualize_tree=False, protected_attributes=["sex"]):
 
     if not keep_protected_input:
         X_train_copy = X_train.copy()
         X_test_copy = X_test.copy()
-        group_test = X_test_copy["sex"].copy()
+        group_test = X_test_copy[protected_attributes].copy()
 
-        X_train = X_train_copy.drop('sex', axis=1)
-        X_test = X_test_copy.drop('sex', axis=1)
-        if "cat_features" in problem["args"]:
-            cflist = [item for item in problem["args"]["cat_features"] if item != "sex"]
-            problem["args"]["cat_features"] = cflist
+        X_train = X_train_copy.drop(protected_attributes, axis=1)
+        X_test = X_test_copy.drop(protected_attributes, axis=1)
+        if "categorical_feature" in problem["args"]:
+            cat_cols = dataset_generator.categorical_input_cols.copy()
+            cat_cols.remove(protected_attributes)
+            categorical_input_col_locations = [X_train.columns.get_loc(col) for col in cat_cols]
+            problem["args"]["categorical_feature"] = categorical_input_col_locations
+
             # problem["args"]["feature_names"] = list(X_train.columns)
 
 
@@ -908,29 +1014,25 @@ def train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, kee
     X_train[X_train.select_dtypes(['object']).columns] = X_train.select_dtypes(['object']).astype("category")
     X_test[X_test.select_dtypes(['object']).columns] = X_test.select_dtypes(['object']).astype("category")
 
+
+    X_train = dataset_generator.check_dtypes(X_train)
+    X_test = dataset_generator.check_dtypes(X_test)
+
     fit_inputs = (X_train, y_train)
     if visualize_tree:
         if "cat_features" in problem["args"]: 
             fit_inputs = Pool(X_train, y_train, cat_features=problem["args"]["cat_features"], feature_names=list(X_train.columns))
             problem["args"]["max_depth"] = 4
 
+
+
+
     if isinstance(fit_inputs, tuple):
         model.fit(*fit_inputs)
     else:
         model.fit(fit_inputs)  # Pass fit_inputs directly
 
-
     y_pred = model.predict(X_test)
-
-    if visualize_tree:
-        if "cat_features" in problem["args"]: 
-            graph = model.plot_tree(tree_idx=0, pool=fit_inputs)
-        else:
-            # graph = model[-1].export_graphviz()
-            dot_data = tree.export_graphviz(model[-1], filled=True, rounded=True, special_characters=True, out_file=None)
-            graph = graphviz.Source(dot_data)
-
-        graph.render('../results/tree_viz/graph_{}_{}'.format(problem["model_name"], sampling_method), format='png')
 
 
     y_probabilities = model.predict_proba(X_test)[:, 1]
@@ -938,14 +1040,12 @@ def train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, kee
     metrics = compute_metrics(y_test, y_pred, y_probabilities, problem)
     fairness_metrics = compute_fairness_metrics(y_test, y_pred, problem, group_test)
 
-    feature_names = X_train.columns.to_list()
-    feature_importance = compute_feature_importance(model,  problem["model_name"], feature_names)
 
     metrics_return = metrics + fairness_metrics
-    return metrics_return, y_pred, feature_importance
+    return metrics_return, y_pred
 
-def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart", generative_seed=0, return_plot=False, sampling_method="class_protected"):
-    print("\t\t Synthetic samples", generative_method)
+def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart", generative_seed=0, return_plot=False, sampling_method="class_protected", protected_attributes=["sex"]):
+    print("\t\t Synthetic samples", generative_method, sampling_method)
     
     target = dataset_generator.target
     max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
@@ -982,8 +1082,9 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                 if size > 0:
                     class_split_df = split_df[split_df[target] == class_label].copy()
                     class_split_df.drop(target, axis=1, inplace=True)
-                    class_split_df.drop('sex', axis=1, inplace=True)
+                    class_split_df.drop(protected_attributes, axis=1, inplace=True)
                     if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        
                         split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
@@ -991,7 +1092,7 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
                     split_synthetic_data[target] = class_label
-                    split_synthetic_data['sex'] = split_key
+                    split_synthetic_data[protected_attributes] = split_key #maybe problem
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
                         split_synthetic_data_plot = split_synthetic_data.copy()
@@ -1024,15 +1125,18 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
 
             if size > 0:
                 class_split_df = split_df.copy()
-                class_split_df.drop('sex', axis=1, inplace=True)
+                class_split_df.drop(protected_attributes, axis=1, inplace=True)
+                class_split_df[target] = class_split_df[target].astype(int)
+
                 if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                    
                     split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
                     split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                 else:
                     split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
                     split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                     
-                split_synthetic_data['sex'] = split_key
+                split_synthetic_data[protected_attributes] = split_key
                 augmented_dfs.append(split_synthetic_data.copy())
                 if return_plot:
                     split_synthetic_data_plot = split_synthetic_data.copy()
@@ -1067,8 +1171,9 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                 if size > 0:
                     class_split_df = split_df[split_df[target] == class_label].copy()
                     class_split_df.drop(target, axis=1, inplace=True)
-                    class_split_df.drop('sex', axis=1, inplace=True)
+                    class_split_df.drop(protected_attributes, axis=1, inplace=True)
                     if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        
                         split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
@@ -1076,7 +1181,7 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
                     split_synthetic_data[target] = class_label
-                    split_synthetic_data['sex'] = split_key
+                    split_synthetic_data[protected_attributes] = split_key
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
                         split_synthetic_data_plot = split_synthetic_data.copy()
@@ -1114,8 +1219,9 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                 if size > 0:
                     class_split_df = split_df[split_df[target] == class_label].copy()
                     class_split_df.drop(target, axis=1, inplace=True)
-                    class_split_df.drop('sex', axis=1, inplace=True)
+                    class_split_df.drop(protected_attributes, axis=1, inplace=True)
                     if generative_method=="tvae" or generative_method=="ctgan" or generative_method=="gaussian_copula":
+                        
                         split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=False, random_state=generative_seed) 
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name=generative_method, decode=False, random_state=generative_seed)
                     else:
@@ -1123,7 +1229,7 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
                         split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
                         
                     split_synthetic_data[target] = class_label
-                    split_synthetic_data['sex'] = split_key
+                    split_synthetic_data[protected_attributes] = split_key
                     augmented_dfs.append(split_synthetic_data.copy())
                     if return_plot:
                         split_synthetic_data_plot = split_synthetic_data.copy()
@@ -1134,133 +1240,109 @@ def get_synthetic_splits(dataset_generator, split_dfs, generative_method="cart",
             return augmented_dfs, augmented_dfs_plot
         return augmented_dfs
 
-def run_experiments(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, sampling_method="same_class", visualize_tree=False):
+# def run_experiments(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, sampling_method="same_class", visualize_tree=False):
 
 
-    target = dataset_generator.target
-    average_problems = []
-    std_problems = []
-    problems_all = []
-    problem_feat_imp_all = []
-    rkf = RepeatedKFold(n_splits=num_folds, n_repeats=num_repeats, random_state=42)
-    for i, (train_index, test_index) in enumerate(rkf.split(all_data)):    
+#     target = dataset_generator.target
+#     average_problems = []
+#     std_problems = []
+#     problems_all = []
+#     problem_feat_imp_all = []
+#     rkf = RepeatedKFold(n_splits=num_folds, n_repeats=num_repeats, random_state=42)
+#     for i, (train_index, test_index) in enumerate(rkf.split(all_data)):    
 
-        print("Split", i, "/", num_repeats*num_folds)
+#         print("Split", i, "/", num_repeats*num_folds)
         
-        data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
-        data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
-        data_test_encoded = dataset_generator.encode(data_test)
+#         data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
+#         data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
+#         data_test_encoded = dataset_generator.encode(data_test)
 
 
 
-        X_train_real = data_train.copy().drop(columns=[target])
+#         X_train_real = data_train.copy().drop(columns=[target])
 
-        y_train_real = data_train_encoded[target].copy().astype("int")
-
-
-        if split_test_set:
-            test_sets, _ = dataset_generator.split_population(data_test)
-        else:
-            test_sets = {}
-        test_sets["all"] = data_test
-
-        split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
+#         y_train_real = data_train_encoded[target].copy().astype("int")
 
 
-        # Get the DataFrame with the maximum length
-        max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
-        # Retrieve the DataFrame using the key
-        max_length_df = split_dfs[max_length_df_key]
+#         if split_test_set:
+#             test_sets, _ = dataset_generator.split_population(data_test)
+#         else:
+#             test_sets = {}
+#         test_sets["all"] = data_test
 
-        max_length_df_class_counts = max_length_df[target].value_counts()
-
-        max_length_df_majority_class = max_length_df_class_counts.idxmax()
-        max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
-
-        augmented_dfs = []
-        # split_df_keys, split_df_vals = zip(*split_dfs.items())
+#         split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
 
 
-        train_sets_X = [X_train_real]
-        train_sets_y = [y_train_real]
+#         # Get the DataFrame with the maximum length
+#         max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
+#         # Retrieve the DataFrame using the key
+#         max_length_df = split_dfs[max_length_df_key]
 
-        for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
-            generative_seed = hash((i, j)) % (2**32 - 1)
+#         max_length_df_class_counts = max_length_df[target].value_counts()
 
-            augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method)
+#         max_length_df_majority_class = max_length_df_class_counts.idxmax()
+#         max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
 
-            # for split_key, split_df in split_dfs.items():
-            #     class_counts = split_df[target].value_counts()
-            #     augmented_dfs.append(split_df)
-
-            #     for class_label, class_count in class_counts.items():
-            #         minority_class_count = class_count
-            #         imbalance = max_length_df_majority_class_count - minority_class_count
-            #         size = imbalance
-
-            #         if size > 0:
-            #             class_split_df = split_df[split_df[target] == class_label].copy()
-            #             class_split_df.drop(target, axis=1, inplace=True)
-            #             class_split_df.drop('sex', axis=1, inplace=True)
-            #             if generative_method=="tvae":
-            #                 split_synthesizer = dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-            #                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
-            #             else:
-            #                 split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-            #                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
-                            
-            #             split_synthetic_data[target] = class_label
-            #             split_synthetic_data['sex'] = split_key
-            #             augmented_dfs.append(split_synthetic_data.copy())
-
-            augmented_trainingset = pd.concat(augmented_dfs)
-
-            augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
-
-            X_train_augmented = augmented_trainingset.drop(columns=[target])
-            y_train_augmented = augmented_trainingset_encoded[target].astype("int")
-
-            # train_real = data_train_encoded[target].astype("int")
-            train_sets_X.append(X_train_augmented)
-            train_sets_y.append(y_train_augmented)
-
-        metrics_all = []
-        feat_imp_all = []
-        for problem in problems_classification:
-            metrics_split = []
-            feat_imp_split = []
-            for X_train, y_train in zip(train_sets_X, train_sets_y):
-                setup_metrics = []
-                preds = [] 
-                fe = [] 
-                for test_set_name, test_set in test_sets.items():
-                    test_set_encoded = dataset_generator.encode(test_set)
-                    X_test = test_set.drop(columns=[target])
-                    y_test = test_set_encoded[target].astype("int")
-
-                    results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method)
-                    setup_metrics.append(results)
-                    preds.append(pred)
-                    fe.append(feature_importance)
-                metrics_split.append(setup_metrics)
-                feat_imp_split.append(fe)
-            metrics_all.append(metrics_split)
-            feat_imp_all.append(feat_imp_split)
-        problems_all.append(metrics_all)
-        problem_feat_imp_all.append(feat_imp_all)
-
-    problems_all = np.array(problems_all)
-
-    problem_feat_imp_all = np.array(problem_feat_imp_all)
+#         augmented_dfs = []
+#         # split_df_keys, split_df_vals = zip(*split_dfs.items())
 
 
-    average_metrics_all = np.mean(problems_all, axis=0)
-    std_metrics_all = np.std(problems_all, axis=0)
+#         train_sets_X = [X_train_real]
+#         train_sets_y = [y_train_real]
 
-    average_feature_importance_all = np.mean(problem_feat_imp_all, axis=0)
-    std_feature_importance_all = np.std(problem_feat_imp_all, axis=0)
+#         for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
+#             generative_seed = hash((i, j)) % (2**32 - 1)
 
-    return average_metrics_all, std_metrics_all, average_feature_importance_all, std_feature_importance_all
+#             augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method, protected_attributes=protected_attributes)
+
+#             augmented_trainingset = pd.concat(augmented_dfs)
+
+#             augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
+
+#             X_train_augmented = augmented_trainingset.drop(columns=[target])
+#             y_train_augmented = augmented_trainingset_encoded[target].astype("int")
+
+#             # train_real = data_train_encoded[target].astype("int")
+#             train_sets_X.append(X_train_augmented)
+#             train_sets_y.append(y_train_augmented)
+
+#         metrics_all = []
+#         feat_imp_all = []
+#         for problem in problems_classification:
+#             metrics_split = []
+#             feat_imp_split = []
+#             for X_train, y_train in zip(train_sets_X, train_sets_y):
+#                 setup_metrics = []
+#                 preds = [] 
+#                 fe = [] 
+#                 for test_set_name, test_set in test_sets.items():
+#                     test_set_encoded = dataset_generator.encode(test_set)
+#                     X_test = test_set.drop(columns=[target])
+#                     y_test = test_set_encoded[target].astype("int")
+
+#                     results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method, protected_attributes=protected_attributes)
+#                     setup_metrics.append(results)
+#                     preds.append(pred)
+#                     fe.append(feature_importance)
+#                 metrics_split.append(setup_metrics)
+#                 feat_imp_split.append(fe)
+#             metrics_all.append(metrics_split)
+#             feat_imp_all.append(feat_imp_split)
+#         problems_all.append(metrics_all)
+#         problem_feat_imp_all.append(feat_imp_all)
+
+#     problems_all = np.array(problems_all)
+
+#     problem_feat_imp_all = np.array(problem_feat_imp_all)
+
+
+#     average_metrics_all = np.mean(problems_all, axis=0)
+#     std_metrics_all = np.std(problems_all, axis=0)
+
+#     average_feature_importance_all = np.mean(problem_feat_imp_all, axis=0)
+#     std_feature_importance_all = np.std(problem_feat_imp_all, axis=0)
+
+#     return average_metrics_all, std_metrics_all, average_feature_importance_all, std_feature_importance_all
 
 
 def run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False, split_test_set=False, visualize_tree=False):
@@ -1316,7 +1398,7 @@ def run_experiments_all_sampling(problems_classification, dataset_generator, all
             for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
                 generative_seed = hash((i, j, t)) % (2**32 - 1)
 
-                augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method)
+                augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method, protected_attributes=protected_attributes)
 
                 augmented_trainingset = pd.concat(augmented_dfs)
 
@@ -1344,7 +1426,7 @@ def run_experiments_all_sampling(problems_classification, dataset_generator, all
                     X_test = test_set.drop(columns=[target])
                     y_test = test_set_encoded[target].astype("int")
 
-                    results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, visualize_tree=visualize_tree, sampling_method=sampling_method)
+                    results, pred, feature_importance = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, protected_attributes=protected_attributes)
                     setup_metrics.append(results)
                     preds.append(pred)
                     fe.append(feature_importance)
@@ -1368,109 +1450,338 @@ def run_experiments_all_sampling(problems_classification, dataset_generator, all
 
     return average_metrics_all, std_metrics_all, average_feature_importance_all, std_feature_importance_all
 
+
+from TabFairGAN_main.TabFairGAN import TabFairGAN
+
+def run_experiments_all_sampling_all_protected(dataset, problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, 
+        protected_attributes_in = ["sex", "race", "both"], keep_protected_input=False, split_test_set=False, visualize_tree=False,
+        dtype_map=None):
+
+
+    target = dataset_generator.target
+    target_class_desired = dataset_generator.target_class_desired
+    average_problems = []
+    std_problems = []
+    problems_all = []
+    rkf = RepeatedKFold(n_splits=num_folds, n_repeats=num_repeats, random_state=42)
+    for i, (train_index, test_index) in enumerate(rkf.split(all_data)):    
+
+        print("Split", i, "/", num_repeats*num_folds)
+        
+        data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
+
+        data_train = dataset_generator.check_dtypes(data_train)
+        data_test = dataset_generator.check_dtypes(data_test)
+
+        data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
+        data_test_encoded = dataset_generator.encode(data_test)
+
+
+        problems_all_protected = []
+
+        for pp, protected_attributes in enumerate(protected_attributes_in):
+            print("\t\t", protected_attributes)
+
+            if protected_attributes == "both":
+                protected_attributes = ["sex", "race"]
+
+            X_train_real = data_train.copy().drop(columns=[target])
+
+            y_train_real = data_train_encoded[target].copy().astype("int")
+
+
+            if split_test_set:
+                test_sets, _ = dataset_generator.split_population(data_test)
+            else:
+                test_sets = {}
+            test_sets["all"] = data_test
+
+            split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
+            print(len(split_dfs))
+
+            total = 0
+
+            for k, v in split_dfs.items():
+                print(k, v.shape)
+                print("\tclass 0 ", v[v[target]==0].shape)
+                print("\tclass 1 ", v[v[target]==1].shape)
+                total += v.shape[0]
+            print(total)
+
+
+            # Get the DataFrame with the maximum length
+            max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
+            # Retrieve the DataFrame using the key
+            max_length_df = split_dfs[max_length_df_key]
+
+            max_length_df_class_counts = max_length_df[target].value_counts()
+
+            max_length_df_majority_class = max_length_df_class_counts.idxmax()
+            max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
+
+            augmented_dfs = []
+            # split_df_keys, split_df_vals = zip(*split_dfs.items())
+
+
+            train_sets_X = [X_train_real]
+            train_sets_y = [y_train_real]
+
+            # tab_fair_gan_args = {"verbose": False, "protected_attributes":[protected_attributes],
+            #                                         "target": target, "target_class_desired": target_class_desired}
+            # synthesizer_tab_fair_gan = TabFairGAN(seed=i, dtype_map=dtype_map, **tab_fair_gan_args)
+
+            # synthesizer_tab_fair_gan.fit(data_train)
+
+            # synthetic_data_tab_fair_gan = synthesizer_tab_fair_gan.generate(int(data_train.shape[0]))
+
+
+            # X_train_tabfairgan = synthetic_data_tab_fair_gan.drop(columns=[target])
+            # y_train_tabfairgan = synthetic_data_tab_fair_gan[target].astype("int")
+            # train_sets_X.append(X_train_tabfairgan)
+            # train_sets_y.append(y_train_tabfairgan)
+
+
+
+            for t, sampling_method in enumerate(problems_classification[0]["sampling_methods"]):
+                for j, generative_method in enumerate(problems_classification[0]["generative_methods"]):
+                    generative_seed = hash((i, j, t, pp)) % (2**32 - 1)
+
+                    augmented_dfs =  get_synthetic_splits(dataset_generator, split_dfs, generative_method=generative_method, generative_seed=generative_seed, sampling_method=sampling_method, protected_attributes=protected_attributes)
+
+                    augmented_trainingset = pd.concat(augmented_dfs)
+
+                    augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
+
+                    X_train_augmented = augmented_trainingset.drop(columns=[target])
+                    y_train_augmented = augmented_trainingset_encoded[target].astype("int")
+
+                    # train_real = data_train_encoded[target].astype("int")
+                    train_sets_X.append(X_train_augmented)
+                    train_sets_y.append(y_train_augmented)
+
+            print("\t Evaluating", protected_attributes)
+            metrics_all = []
+            feat_imp_all = []
+            for problem in problems_classification:
+                metrics_split = []
+                feat_imp_split = []
+                for X_train, y_train in zip(train_sets_X, train_sets_y):
+                    setup_metrics = []
+                    preds = [] 
+                    fe = [] 
+                    for test_set_name, test_set in test_sets.items():
+                        test_set_encoded = dataset_generator.encode(test_set)
+                        X_test = test_set.drop(columns=[target])
+                        y_test = test_set_encoded[target].astype("int")
+
+                        results, pred = train_eval(dataset_generator, X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input, protected_attributes=protected_attributes)
+                        setup_metrics.append(results)
+                        preds.append(pred)
+                    metrics_split.append(setup_metrics)
+                metrics_all.append(metrics_split)
+            problems_all_protected.append(metrics_all)
+        problems_all.append(problems_all_protected)
+
+
+
+    problems_all = np.array(problems_all)
+
+    average_metrics_all = np.mean(problems_all, axis=0)
+    std_metrics_all = np.std(problems_all, axis=0)
+
+
+    return average_metrics_all, std_metrics_all
+
+
+
+
+def generate_latex_table_max_all_methods_sex_race(all_metrics_mean, all_metrics_std, names_train, names_test, problems, protected_attributes_all, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[], include_std=True):
     
-# def run_experiments_old(problems_classification, dataset_generator, all_data, num_repeats = 1, num_folds = 2, protected_attributes = ["sex"], keep_protected_input=False):
 
-#     average_problems = []
-#     std_problems = []
-#     for problem in problems_classification:
-#         print(problem["model_name"])
+    len_prot = len(protected_attributes_all)
+    len_metr = len(metric_names_actual)//len(protected_attributes_all)
+    # metrics_optimal = [element for element in metrics_optimal for _ in range(3)]
 
-#         rkf = RepeatedKFold(n_splits=num_folds, n_repeats=num_repeats, random_state=42)
-#         all_metrics_mean = []
-#         all_metrics_std = []
-#         metrics_all = []
-#         for i, (train_index, test_index) in enumerate(rkf.split(all_data)):    
+    sampling_methods = problems[0]["sampling_methods"]
+    if test_data:
+        all_cols =  str(len(metric_names_actual) * len(names_test))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
 
-#             print(problem["model_name"], i)
-#             data_train, data_test = all_data.loc[train_index], all_data.loc[test_index]
-#             data_train_encoded = dataset_generator.encode(data_train, keep_dtypes=True)
-#             data_test_encoded = dataset_generator.encode(data_test)
+    if longtable:
+        latex_table = "\\begin{center}\n"
+        latex_table += "\\begin{longtable}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+        latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+    else:
 
+        latex_table = "\\begin{table*}[h]\n"
+        latex_table += "\\caption{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
 
-#             X_train_real = data_train.copy().drop(columns=[target])
-#             y_train_real = data_train_encoded[target].copy().astype("int")
+        latex_table += "\\centering\n"
+        # latex_table += "\\scalebox{0.70}{\n"
+        latex_table += "\\begin{tabular}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    latex_table += "\\hline\n"
 
-#             test_sets, _ = dataset_generator.split_population(data_test)
-#             test_sets["all"] = data_test
+    latex_table += "\\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
 
-#             split_dfs, additional_sizes = dataset_generator.split_population(data_train, protected_attributes=protected_attributes)
-
-
-#             # Get the DataFrame with the maximum length
-#             max_length_df_key = max(split_dfs, key=lambda x: len(split_dfs[x]))
-#             # Retrieve the DataFrame using the key
-#             max_length_df = split_dfs[max_length_df_key]
-
-#             max_length_df_class_counts = max_length_df[target].value_counts()
-
-#             max_length_df_majority_class = max_length_df_class_counts.idxmax()
-#             max_length_df_majority_class_count = max_length_df_class_counts[max_length_df_majority_class]
-
-#             augmented_dfs = []
-#             split_df_keys, split_df_vals = zip(*split_dfs.items())
+    # latex_table += "\cline{3-" + str(2+len(metric_names_actual)) +"}"
 
 
-#             train_sets_X = [X_train_real]
-#             train_sets_y = [y_train_real]
+    latex_table +=  "& " + "".join([" & " + " & ".join([f"\\multicolumn{{{len_metr}}}{{c}}{{{prot}}}" for prot in protected_attributes_all]) for _ in range(len(names_test))]) + " \\\\\n"
 
-#             for j, generative_method in enumerate(problem["generative_methods"]):
-#                 generative_seed = hash((i, j)) % (2**32 - 1)
-#                 print("\t", generative_method, "seed", generative_seed)
+    latex_table +=  "& & " + " & ".join(metric_names_actual) + " \\\\\n"
 
-#                 for split_key, split_df in split_dfs.items():
-#                     class_counts = split_df[target].value_counts()
-#                     augmented_dfs.append(split_df)
 
-#                     for class_label, class_count in class_counts.items():
-#                         minority_class_count = class_count
-#                         imbalance = max_length_df_majority_class_count - minority_class_count
-#                         size = imbalance
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
 
-#                         if size > 0:
-#                             class_split_df = split_df[split_df[target] == class_label].copy()
-#                             class_split_df.drop(target, axis=1, inplace=True)
-#                             class_split_df.drop('sex', axis=1, inplace=True)
-#                             if generative_method=="tvae":
-#                                 split_synthesizer = dataset_generator.train_synthesizer("tvae", class_split_df, encode=False, random_state=generative_seed) 
-#                                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, name="tvae", decode=False, random_state=generative_seed)
-#                             else:
-#                                 split_synthesizer = dataset_generator.train_synthesizer(generative_method, class_split_df, encode=True, random_state=generative_seed) 
-#                                 split_synthetic_data = dataset_generator.generate_data(split_synthesizer, num=size, random_state=generative_seed)
-                                
-#                             split_synthetic_data[target] = class_label
-#                             split_synthetic_data['sex'] = split_key
-#                             augmented_dfs.append(split_synthetic_data.copy())
+    latex_table += " & " + "\\multirow{1}{*}{Real}"
 
-#                 augmented_trainingset = pd.concat(augmented_dfs)
-#                 augmented_trainingset_encoded = dataset_generator.encode(augmented_trainingset, keep_dtypes=True)
 
-#                 X_train_augmented = augmented_trainingset.drop(columns=[target])
-#                 y_train_augmented = augmented_trainingset_encoded[target].astype("int")
+    max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean)
+    
+    max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+    min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+    second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+    second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
 
-#                 # train_real = data_train_encoded[target].astype("int")
-#                 train_sets_X.append(X_train_augmented)
-#                 train_sets_y.append(y_train_augmented)
+    real_avgs = np.round(all_metrics_mean[0][0],3)
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, include_std=include_std)
 
-#             metrics_split = []
-            
-#             for X_train, y_train in zip(train_sets_X, train_sets_y):
-#                 setup_metrics = []
-#                 preds = [] 
-#                 for test_set_name, test_set in test_sets.items():
-#                     test_set_encoded = dataset_generator.encode(test_set)
-#                     X_test = test_set.drop(columns=[target])
-#                     y_test = test_set_encoded[target].astype("int")
-#                     results, pred = train_eval(X_train, y_train, X_test, y_test, problem, keep_protected_input=keep_protected_input)
-#                     setup_metrics.append(results)
-#                     preds.append(pred)
-#                 metrics_split.append(setup_metrics)
-#             print("metrics_split", np.array(metrics_split).shape)
-#             metrics_all.append(metrics_split)
-#         metrics_all = np.array(metrics_all)    
-#         print("Metrics_all", metrics_all.shape)
-#         average_metrics_all = np.mean(metrics_all, axis=0)
-#         std_metrics_all = np.std(metrics_all, axis=0)
-#         average_problems.append(average_metrics_all)
-#         std_problems.append(std_metrics_all)
-#     return np.array(average_problems), np.array(std_problems)
+    
+    latex_table += avgs_stds_c + " \\\\\n"
+
+    latex_table += "\\hline\n"
+    latex_table += " & " + "\\multirow{1}{*}{\\tabfairgan}"
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 1,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix, include_std=include_std)
+
+    latex_table += avgs_stds_c + " \\\\\n"
+
+    latex_table += "\\hline\n"
+    latex_table += "\\hline\n"
+
+    
+    start_others = 2
+    for s, sampling_method in enumerate(sampling_methods):
+        latex_table += "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+        for i in range(len(names_train)):
+
+            index = s * len(names_train) + i + start_others
+
+            train_name = names_train[i]
+            # if "makecell" in train_name:
+            #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+            # else:
+        
+            if i==0:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+            else:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+
+            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix, include_std=include_std)
+
+            latex_table += avgs_stds_c + " \\\\\n"
+        latex_table += "\\hline\n"
+
+        
+
+    latex_table += "\\end{tabular}\n"
+    latex_table += "\\end{table*}"
+    
+    return latex_table
+
+
+
+def generate_latex_table_max_all_methods_sex_race_both(all_metrics_mean, all_metrics_std, names_train, names_test, problems, protected_attributes_all, test_data=False, metric_names_actual=[], metrics_optimal=None, dataset_name="", longtable=False, color_best_matrix=[], include_std=True):
+    
+
+    len_prot = len(protected_attributes_all)
+    len_metr = len(metric_names_actual)//len(protected_attributes_all)
+    # metrics_optimal = [element for element in metrics_optimal for _ in range(3)]
+
+    sampling_methods = problems[0]["sampling_methods"]
+    if test_data:
+        all_cols =  str(len(metric_names_actual) * len(names_test))
+    else:
+        all_cols = str(len(problems[0]["metric_names"]) + 2)
+
+    if longtable:
+        latex_table = "\\begin{center}\n"
+        latex_table += "\\begin{longtable}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+        latex_table += "\\caption[{}]".format(dataset_name) + "{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\\\ \n".format(dataset_name[1:])
+    else:
+
+        latex_table = "\\begin{table*}[h]\n"
+        latex_table += "\\caption{{{}}}\n".format(dataset_name)
+        latex_table += "\\label{{tab:results_{}}}\n".format(dataset_name[1:])
+
+        latex_table += "\\centering\n"
+        # latex_table += "\\scalebox{0.70}{\n"
+        latex_table += "\\begin{tabular}{l l " + " ".join(["c"]*(int(all_cols))) + "}\n"
+    latex_table += "\\hline\n"
+
+    latex_table += "\\samplingmethod & \\training & \multicolumn{" + str(len(names_test) * len(metric_names_actual)) + "}{c}{\\metrics} \\\\\n" 
+
+    # latex_table += "\cline{3-" + str(2+len(metric_names_actual)) +"}"
+
+
+    latex_table +=  "& " + "".join([" & " + " & ".join([f"\\multicolumn{{{len_metr}}}{{c}}{{{prot}}}" for prot in protected_attributes_all]) for _ in range(len(names_test))]) + " \\\\\n"
+
+    latex_table +=  "& & " + " & ".join(metric_names_actual) + " \\\\\n"
+
+
+    latex_table += "\\hline"
+    count_make_cell = sum("makecell" in item for item in names_train)
+
+    latex_table += " & " + "\\multirow{1}{*}{Real}"
+
+
+    max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column = get_max_min(all_metrics_mean)
+    
+    max_of_each_column = ["{:.3f}".format(x) for x in max_of_each_column]
+    min_of_each_column = ["{:.3f}".format(x) for x in min_of_each_column]
+    second_max_of_each_column = ["{:.3f}".format(x) for x in second_max_of_each_column]
+    second_min_of_each_column = ["{:.3f}".format(x) for x in second_min_of_each_column]
+
+    real_avgs = np.round(all_metrics_mean[0][0],3)
+    avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, 0,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, include_std=include_std)
+
+    
+    latex_table += avgs_stds_c + " \\\\\n"
+
+    latex_table += "\\hline\n"
+
+    
+    start_others = 1
+    for s, sampling_method in enumerate(sampling_methods):
+        latex_table += "\\multirow{" + str(len(names_train)) + "}{*}{" + sampling_method + "}"
+
+        for i in range(len(names_train)):
+
+            index = s * len(names_train) + i + start_others
+
+            train_name = names_train[i]
+            # if "makecell" in train_name:
+            #     latex_table += " & " + "\\multirow{2}{*}{" + train_name + "}"
+            # else:
+        
+            if i==0:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+            else:
+                latex_table += " & " + "\\multirow{1}{*}{" + train_name + "}"
+
+            avgs_stds_c = get_metric_row_avg(all_metrics_mean, all_metrics_std, index,  names_test, max_of_each_column, min_of_each_column, second_max_of_each_column, second_min_of_each_column, metrics_optimal, real_avgs=real_avgs, color_best_matrix=color_best_matrix, include_std=include_std)
+
+            latex_table += avgs_stds_c + " \\\\\n"
+        latex_table += "\\hline\n"
+
+        
+
+    latex_table += "\\end{tabular}\n"
+    latex_table += "\\end{table*}"
+    
+    return latex_table

@@ -21,12 +21,9 @@ from sdv.single_table import CTGANSynthesizer
 
 
 class Dataset():
-    def __init__(self, dataset_name, binary_features=False, ignore_features=[], protected_attribute="sex"):
+    def __init__(self, dataset_name, binary_features=False, ignore_features=[]):
         self.binary_features = binary_features
         self.ignore_features = ignore_features
-        self.protected_attribute = protected_attribute
-
-
         dataframe = self.load_dataset(dataset_name)
 
 
@@ -56,6 +53,9 @@ class Dataset():
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/adult-clean.csv"
 
             target = "Class-label"
+            self.target_class_desired = ">50K"
+
+
 
             folder_path = "datasets/{}".format(dataset_name)
 
@@ -92,6 +92,9 @@ class Dataset():
                     print(dataset_name)
     
                     exit(1)
+
+                df['race'] = df['race'].apply(lambda x: 'Other' if x != 'White' else x)
+                
                 # Save the data to the specified file path as JSON
                 df.to_json(json_file_path, orient='records', lines=True)
             else:
@@ -133,15 +136,21 @@ class Dataset():
 
 
         elif dataset_name == "compas":
-            self.ignore_features = ["id", "age_cat", "priors_count.1", "violent_recid"]
+            self.ignore_features = ["name", "first", "last", "dob", "compas_screening_date", "c_jail_in", "c_jail_out",
+                                    "c_case_number", "c_offense_date", "c_arrest_date", "c_charge_desc", "r_case_number",
+                                    "r_offense_date", "r_charge_desc", "r_jail_in", "r_jail_out", "vr_case_number", "vr_offense_date",
+                                    "vr_charge_desc", "type_of_assessment", "screening_date", "v_screening_date", "v_type_of_assessment",
+                                    "in_custody", "out_custody", "id", "priors_count.1", "violent_recid", "age_cat"]
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/compas-scores-two-years_clean.csv"
             target = "two_year_recid"
+
+            self.target_class_desired = 1
 
             # Define the file path where you want to save the data
             folder_path = "datasets/{}".format(dataset_name)
 
             if len(self.ignore_features) > 0:
-                dataset_name += "_" + "_".join(self.ignore_features)
+                dataset_name += "_clean" #+ "_".join(self.ignore_features)
 
             json_file_path = os.path.join(folder_path, "{}.json".format(dataset_name))
 
@@ -188,7 +197,7 @@ class Dataset():
                 'sex': 'category', 
                 'dob': 'category', 
                 'age': 'int', 
-                'age_cat': 'category', 
+                'age_cat': 'category',
                 'race': 'category', 
                 'juv_fel_count': 'int', 
                 'decile_score': 'int', 
@@ -253,6 +262,7 @@ class Dataset():
             self.ignore_features = []
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/dutch.csv"
             target = "occupation"
+            self.target_class_desired = 1
 
             # Define the file path where you want to save the data
             folder_path = "datasets/{}".format(dataset_name)
@@ -311,7 +321,6 @@ class Dataset():
                 'cur_eco_activity': 'category', 
                 'marital_status': 'category', 
                 'occupation': 'category', 
-                "dummy": 'int'
             }
 
             if len(self.ignore_features)>0:
@@ -334,6 +343,8 @@ class Dataset():
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/german_data_credit.csv"
 
             target = "class-label"
+            self.target_class_desired = 1
+
 
             # Define the file path where you want to save the data
             folder_path = "datasets/{}".format(dataset_name)
@@ -420,6 +431,7 @@ class Dataset():
             url = "https://raw.githubusercontent.com/tailequy/fairness_dataset/main/experiments/data/credit-card-clients.csv"
 
             target = "default payment"
+            self.target_class_desired = 1
 
             self.dtype_map = {
                 "limit_bal": "int",
@@ -549,7 +561,7 @@ class Dataset():
         self.target = target
 
         df_dummy_drop = df.copy()
-        df_dummy_drop = df_dummy_drop.drop(columns=[target, self.protected_attribute])
+        df_dummy_drop = df_dummy_drop.drop(columns=[target])
 
         self.categorical_input_cols = [col for col in df_dummy_drop.columns if self.dtype_map[col] == "category"]
 
@@ -596,6 +608,8 @@ class Dataset():
 
     def train_synthesizer(self, name, dataframe, y=[], encode=True, random_state=42):
 
+
+
         synthesizer, arguments = self.get_synthesizer_method(name, dataframe, random_state=random_state)
 
         if encode:
@@ -608,10 +622,21 @@ class Dataset():
 
         return synthesizer
 
+    def generate_unique_file_path(self, base_path, name, random_state):
+        counter = 0
+        file_path = base_path.format(name, random_state)
+        while os.path.exists(file_path):
+            counter += 1
+            file_path = base_path.format(name, f"{random_state}_{counter}")
+        return file_path
+    
     def generate_data(self, synthesizer, num=100, name="", decode=True, dataframe=[], random_state=42):
         if name=="tvae" or name=="ctgan" or name=="gaussian_copula":
             # synthesizer._set_random_state(random_state)
-            synthetic_data = synthesizer.sample(int(num))
+            base_file_path = "temp/{}/temp_{}.csv"
+            unique_file_path = self.generate_unique_file_path(base_file_path, name, random_state)
+
+            synthetic_data = synthesizer.sample(int(num), output_file_path=unique_file_path)
         else:
             synthetic_data = synthesizer.generate(int(num))
 
@@ -635,7 +660,29 @@ class Dataset():
 
         return synthetic_data
 
+    def check_dtypes(self, dataframe):
+        columns_in = dataframe.columns 
+        dtypes_existing = {k: self.dtype_map[k] for k in columns_in}
+
+        try:
+            dataframe = dataframe.astype(dtypes_existing)
+        except:
+            pass
+
+
+        dtypes_dict_in = dataframe.dtypes.apply(lambda x: x.name).to_dict()
+
+        # print(dtypes_dict_in)
+        # print(dtypes_existing)
+        mismatches = [(key, dtypes_existing[key], dtypes_dict_in[key]) for key in dtypes_existing if not ((dtypes_existing[key] in ['int', 'int64'] and dtypes_dict_in[key] in ['int', 'int64']) or dtypes_existing[key] == dtypes_dict_in[key])]
+
+
+        # Print mismatches if there are any, otherwise assert
+        assert not mismatches, f"Dictionaries do not match: {mismatches}"
+
+        return dataframe
     def split_population(self, dataframe, protected_attributes=["sex"]):
+    
         # Split the DataFrame based on the value pairs of protected attributes
         split_dfs = {}
         split_sizes = {}

@@ -64,7 +64,7 @@ class SMOTENC_GENERATIVE(SMOTENC):
         categorical_encoder=None,
         sampling_strategy="auto",
         random_state=None,
-        k_neighbors=5,
+        k_neighbors=3,
         n_jobs=None,
     ):
         super().__init__(

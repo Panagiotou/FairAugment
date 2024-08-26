@@ -65,7 +65,7 @@ def run(dataset, protected_attribute):
 
     print("Running", dataset, protected_attribute)
 
-    dataset_generator = Dataset(dataset)
+    dataset_generator = Dataset(dataset, protected_attribute=protected_attribute)
     all_data = dataset_generator.original_dataframe.copy()
 
     column_types_map = [dataset_generator.dtype_map[col] for col in all_data.columns]
@@ -73,15 +73,15 @@ def run(dataset, protected_attribute):
     # Check if all columns have the data type 'category'
     all_categorical = all(dtype == 'category' for dtype in column_types_map)
 
-    # generative_methods = ["tvae", "cart", "smote"]
     generative_methods = ["gaussian_copula", "ctgan", "tvae", "cart", "smote"]
+    # generative_methods = ["cart"]
 
     if all_categorical:
         print("Only categorical features, dropping SMOTE")
         generative_methods.remove("smote")
 
-    problem_classification = {"metrics":[balanced_accuracy_score, f1_score, roc_auc_score],
-                        "metric_names":["BAcc", "F1", "ROC AUC"],
+    problem_classification = {"metrics":[accuracy_score, f1_score, roc_auc_score],
+                        "metric_names":["Acc", "F1", "ROC AUC"],
                         "fairness_metrics": [eq_odd, stat_par, eq_opp],
                         "fairness_metric_names": ["Equalized odds", "Statistical Parity", "Equal Opportunity"],
                         "generative_methods":generative_methods,
@@ -125,10 +125,13 @@ def run(dataset, protected_attribute):
     #                     ('classifier', LGBMClassifier(categorical_feature=dataset_generator.categorical_input_col_locations, verbose=-1))])  
 
                         
-    model_names_classification = ["LightGBM", "XGBoost", "Decission Tree", "Random Forest"]
+
+    model_names_classification = ["LightGBM"]
+    # model_names_classification = ["LightGBM", "XGBoost", "Decission Tree", "Random Forest"]
 
 
-    models_classification = [LGBMClassifier, xgb.XGBClassifier, clf_DT, clf_RF]
+    models_classification = [LGBMClassifier]
+    # models_classification = [LGBMClassifier, xgb.XGBClassifier, clf_DT, clf_RF]
 
 
 
@@ -142,11 +145,19 @@ def run(dataset, protected_attribute):
         problem["args"] = arg
         problems_classification.append(problem)
 
+    num_repeats = 1
+    num_folds = 3
 
-    average, std, feat_imp_average, feat_imp_std = run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = 5, num_folds = 3, protected_attributes = [protected_attribute])
+
+    if protected_attribute=="both":
+        protected_attribute_in = ["sex", "race"]
+    else:
+        protected_attribute_in = [protected_attribute]
+
+    average, std, feat_imp_average, feat_imp_std = run_experiments_all_sampling(problems_classification, dataset_generator, all_data, num_repeats = num_repeats, num_folds = num_folds, protected_attributes = protected_attribute_in)
 
     print(average.shape)
-    np.savez('../results/{}/arrays/arrays_all_models_all_fairness_metrics_bacc.npz'.format(dataset), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
+    np.savez('../results/{}/arrays/arrays_all_models_all_fairness_metrics_{}.npz'.format(dataset, protected_attribute), average=average, std=std, feat_imp_average=feat_imp_average, feat_imp_std=feat_imp_std)
 
 if __name__ == '__main__':
     run()
